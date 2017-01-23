@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="public_mm_src">
+    <CLASSES />
+    <JAVADOC />
+    <SOURCES>
+      <root url="file://$PROJECT_DIR$/../public_mm_src/tools/SemanticTypeIndexing/src" />
+    </SOURCES>
+  </library>
+</component>
