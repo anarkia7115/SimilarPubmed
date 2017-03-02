@@ -17,10 +17,11 @@ import scala.io.Source
   * Created by shawn on 1/19/17.
   */
 
-class CompareWords extends LazyLogging{
+class CompareWords(inputFile:String, outputFile:String) 
+    extends LazyLogging{
   val parser = new PubmedXmlParser()
-  val inputFile = "./data/abs.txt"
-  val outputFile = "./data/analyzed.txt"
+  //val inputFile = "./data/abs.txt"
+  //val outputFile = "./data/analyzed.txt"
 
   def main: Unit = {
     //val parser = new PubmedXmlParser()

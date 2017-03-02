@@ -3,16 +3,16 @@ package topic
 import java.sql.{Connection, DriverManager}
 import java.sql.ResultSet
 
-class ConnectDownload {
+class ConnectDownload(outputFile:String) {
   val url = "jdbc:mysql://192.168.2.10:3306/pubmed"
   val driver = "com.mysql.jdbc.Driver"
   val username = "devuser"
   val password = "111111"
   var connection: Connection = _
   val limitNum = 50000
-  val outputFile = "/home/shawn/git/SimilarPubmed/data/abs.txt"
+  //val outputFile = "/home/shawn/git/SimilarPubmed/data/abs.txt"
 
-  def init(): Unit = {
+  def this(): Unit = {
   }
 
   def getResultSet(query:String): ResultSet = {

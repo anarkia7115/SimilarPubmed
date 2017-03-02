@@ -22,8 +22,8 @@ import com.typesafe.scalalogging.LazyLogging
 object Main extends LazyLogging {
   def main(args: Array[String]): Unit = {
     // 1. compare words
-    val cw = new CompareWords()
-    cw.main
+    //val cw = new CompareWords()
+    //cw.main
     //
     // 2. calculate idf
     //
@@ -31,8 +31,15 @@ object Main extends LazyLogging {
     //val pl = new PmidLength()
     //pl.main
     //logger.info("what the fuck!")
+
     // 4. test Connector
-    //val connector = new ConnectDownload()
-    //connector.run
+    val absOut = "./data/abs_big.txt"
+    //val connector = new ConnectDownload(absOut)
+    //connector.runAbs
+
+    // 1. compare words
+    val analyzedOut = "./data/analyzed_big.txt"
+    val cw = new CompareWords(absOut, analyzedOut)
+    cw.main
   }
 }
