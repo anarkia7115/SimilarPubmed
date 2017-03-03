@@ -37,9 +37,24 @@ object Main extends LazyLogging {
     //val connector = new ConnectDownload(absOut)
     //connector.runAbs
 
-    // 1. compare words
-    val analyzedOut = "./data/analyzed_big.txt"
-    val cw = new CompareWords(absOut, analyzedOut)
-    cw.main
+    // 5. compare words
+    val analyzedOut = "./data/analyzed.txt"
+    //val cw = new CompareWords(absOut, analyzedOut)
+    //cw.main
+
+    // 6. run topic match
+    val conn = new Connector()
+    val uniqPmidOut = "./data/uniq_pmid"
+    conn.generatePmidFocus(analyzedOut, uniqPmidOut)
+    logger.info("pmidFocus generated")
+
+    val pmidTable = "focus_pmid"
+    val pmidTopicFile = "./data/pmid_topic"
+    conn.createPmidFocusTable(pmidTable)
+    logger.info("focus_pmid created")
+    conn.insertRecords(uniqPmidOut, pmidTable)
+    logger.info("insert finished")
+    conn.runTopic(pmidTable, pmidTopicFile)
+    logger.info("topic finished")
   }
 }
