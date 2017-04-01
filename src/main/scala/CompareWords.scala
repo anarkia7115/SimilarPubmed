@@ -9,7 +9,6 @@ import gov.nih.nlm.nls.metamap.Result
 import scala.collection.mutable.ListBuffer
 //import grizzled.slf4j.{Logger, Logging}
 import com.typesafe.scalalogging.LazyLogging
-
 import java.io._
 import scala.io.Source
 
@@ -19,7 +18,7 @@ import scala.io.Source
 
 class CompareWords(inputFile:String, outputFile:String) 
     extends LazyLogging{
-  val parser = new PubmedXmlParser()
+  //val parser = new PubmedXmlParser()
   //val inputFile = "./data/abs.txt"
   //val outputFile = "./data/analyzed.txt"
 
@@ -34,7 +33,6 @@ class CompareWords(inputFile:String, outputFile:String)
     var articleNumbers = 0
     //println("article size" + pubmedArticleList.size.toString)
     val analyzer = new ConceptAnalyzer()
-    analyzer.init
 
     val pw = new PrintWriter(new File(outputFile))
     for (line <- Source.fromFile(inputFile).getLines()){
@@ -42,6 +40,7 @@ class CompareWords(inputFile:String, outputFile:String)
       articleNumbers = articleNumbers + 1
       logger.info("analyzed " + articleNumbers.toString + " articles.")
     }
+    pw.close
     /*
     pubmedArticleList.foreach(pa => {
       analyzer.process(pa)

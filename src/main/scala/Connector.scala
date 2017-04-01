@@ -4,6 +4,7 @@ import java.sql.{Connection, DriverManager}
 import java.sql.ResultSet
 import java.io._
 import scala.io.Source
+import scala.collection.mutable.ListBuffer
 
 class Connector {
   val url = "jdbc:mysql://192.168.2.10:3306/pubmed"
@@ -11,11 +12,11 @@ class Connector {
   val username = "devuser"
   val password = "111111"
   var connection: Connection = _
-  val limitNum = 50000
+  val limitNum = 5000000
   //val outputFile = "/home/shawn/git/SimilarPubmed/data/abs.txt"
 
   def execQuery(query:String): ResultSet = {
-    if (connection.isClosed()) {
+    if (connection == null || connection.isClosed()) {
       Class.forName(driver)
       connection = DriverManager.getConnection(url, username, password)
     }
@@ -53,7 +54,7 @@ class Connector {
 
     execUpdate(query1)
     execUpdate(query2)
-    connection.close
+    //connection.close
   }
 
   def generatePmidFocus(inputFile:String, outputFile:String
@@ -73,6 +74,7 @@ class Connector {
         prevPmid = pmid
       }
     }
+    pw.close
   }
 
   def insertRecords(uniqLoadFile:String, tableName:String): Unit = {
@@ -83,7 +85,7 @@ class Connector {
     LINES TERMINATED BY '\n';
     """.format(uniqLoadFile, tableName)
     execUpdate(query)
-    connection.close
+    //connection.close
   }
 
   def runTopic(pmidTable:String, 
@@ -117,7 +119,130 @@ class Connector {
     }
     println("%s lines writed to %s".format(lineNum, outputFile))
     pw.close
-    connection.close
+    //connection.close
+  }
+
+  def runOneTitleAbs(pmid:Int):(String, String) = {
+
+    val query = """
+    SELECT article_title, abstract_text
+    FROM medline_citation
+    WHERE abstract_text != ''
+    AND pmid = %s
+    ;
+    """.format(pmid)
+
+    val rs = execQuery(query)
+    var absText = ""
+    var aTitle = ""
+
+    if(rs.next){
+    //val pmid = rs.getString("pmid").toInt
+      aTitle = rs.getString("article_title").replaceAll("\t", " ").replaceAll("[^\\x00-\\x7F]", "")
+      absText = rs.getString("abstract_text").replaceAll("\t", " ").replaceAll("[^\\x00-\\x7F]", "")
+    }
+    else {
+      aTitle = ""
+      absText = ""
+    }
+
+    rs.close
+    return (aTitle, absText)
+  }
+
+  def runOneAbs(pmid:Int):String = {
+
+    val query = """
+    SELECT pmid, abstract_text
+    FROM medline_citation
+    WHERE abstract_text != ''
+    AND pmid = %s
+    ;
+    """.format(pmid)
+
+    val rs = execQuery(query)
+    var absText = ""
+
+    if(rs.next){
+    //val pmid = rs.getString("pmid").toInt
+      absText = rs.getString("abstract_text").replaceAll("\t", " ").replaceAll("[^\\x00-\\x7F]", "")
+    }
+    else {
+      absText = ""
+    }
+    rs.close
+    return absText
+  }
+
+  def runOneTopic(pmid:Int):List[String] = {
+
+    val query = """
+    SELECT pmid, descriptor_name
+    from medline_mesh_heading 
+    WHERE 1 = 1
+    AND pmid = %s
+    ;
+    """.format(pmid)
+
+    val rs = execQuery(query)
+    val topicList = ListBuffer[String]()
+
+    while(rs.next) {
+      val desName = rs.getString("descriptor_name")
+      topicList += desName
+    }
+    return topicList.toList
+  }
+
+  def runExcludeAbs(excludePmidSet:scala.collection.Set[Int], outputFile:String):Unit = {
+
+    val query = """
+    SELECT pmid, abstract_text
+    FROM medline_citation
+    WHERE abstract_text != ''
+    LIMIT %s
+    ;
+    """.format(limitNum)
+
+    val rs = execQuery(query)
+    val xtr = new XmlTagRemover("AbstractText")
+
+    val pw = new PrintWriter(new File(outputFile))
+
+    var lineNum = 0
+    var skipLineNum = 0
+
+    while(rs.next) {
+      val pmid = rs.getString("pmid").toInt
+      val absData = rs.getString("abstract_text")
+      //println(absData)
+      //val absXml = scala.xml.XML.load(absBytes)
+      //val absText = absXml \ "AbstractText"
+      val absText = xtr.trim(absData)
+      //val absText = absXml.text
+      if(!excludePmidSet.contains(pmid)) {
+        pw.write(pmid + "\t" + absText + "\n")
+        lineNum += 1
+        if (lineNum % 10000 == 0){
+          println("%s lines writed to %s".format(lineNum, outputFile))
+        }
+      }
+      else{
+        skipLineNum += 1
+        if (skipLineNum % 5000 == 0){
+          println("%s lines skipped. ")
+        }
+      }
+      //println(lineNum)
+
+      //print(pmid + ": " + absText)
+      //println("[xml label]: %s".format(absXml.label))
+      //println("[pmid]: %s".format(pmid))
+      //println("[abstract_text]: %s".format(absText))
+    }
+    println("%s lines writed to %s".format(lineNum, outputFile))
+    pw.close
+    //connection.close
   }
 
   def runAbs(outputFile:String):Unit = {
@@ -159,6 +284,6 @@ class Connector {
     }
     println("%s lines writed to %s".format(lineNum, outputFile))
     pw.close
-    connection.close
+    //connection.close
   }
 }
