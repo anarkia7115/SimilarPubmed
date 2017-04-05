@@ -91,7 +91,7 @@ class Connector {
   def runTopic(pmidTable:String, 
       outputFile:String): Unit = {
     val query = """
-    select a.pmid, b.descriptor_name
+    select a.pmid, b.descriptor_name, descriptor_name_major_yn
     from %s a
     inner join medline_mesh_heading b
     on a.pmid = b.pmid;
@@ -104,8 +104,9 @@ class Connector {
     while(rs.next) {
       val pmid = rs.getString("pmid")
       val descName = rs.getString("descriptor_name")
+      val descMajorName = rs.getString("descriptor_name_major_yn")
 
-      pw.write(pmid + "\t" + descName + "\n")
+      pw.write(pmid + "\t" + descName + "\t" + descMajorName + "\n")
       lineNum += 1
       //println(lineNum)
 

@@ -73,12 +73,19 @@ object Main extends LazyLogging {
 
     val usedPmidFile1 = "./data/abs.txt"
     val usedPmidFile2 = "./data/abs_mar13.txt"
-    val usedPmidSet = al.loadPmidSet(List(usedPmidFile1, usedPmidFile2), 0)
-    val absFile = "./data/abs_mar13_2.txt"
+    //val usedPmidSet = al.loadPmidSet(List(usedPmidFile1, usedPmidFile2), 0)
+    val absFile = "./data/abs_apr4.txt"
+    val meshFile = "./data/mesh_apr4.txt"
+    val conn = new Connector()
+    //conn.runAbs(absFile)
+    runTopic(absFile, meshFile)
 
-    val absLocal = "file:///home/shawn/git/SimilarPubmed/data/abs.txt"
-    //val rstHdfs = "hdfs://localhost:9000/user/shawn/abs_count_result"
+    /*
+    val inputAbsFile = args(0)
+    println(inputAbsFile)
     val testSparkHdfs = "hdfs://localhost:9000/user/shawn/test_spark_result"
+    val rstHdfs = "hdfs://localhost:9000/user/shawn/%s".format(args(1))
+    //val rstHdfs = "hdfs://localhost:9000/user/shawn/abs_count_result"
     val sConf = new SparkConf()
                   .setMaster("local[*]")
                   .setAppName("SimilarPubmed")
@@ -87,13 +94,11 @@ object Main extends LazyLogging {
 
     // init spark
     val sc = new SparkContext(sConf)
+    */
     //val absSc = sc.textFile(absLocal)
     //val testSparkSc = sc.textFile(testSparkFile)
     //val absSmall = "./data/abs_small.txt"
-    val inputAbsFile = args(0)
-    val rstHdfs = "hdfs://localhost:9000/user/shawn/%s".format(args(1))
-    println(inputAbsFile)
-    val analyzerSparkSc = sc.textFile(inputAbsFile, 100)
+    //val analyzerSparkSc = sc.textFile(inputAbsFile, 100)
     // init analyzer
     //val analyzer = new ConceptAnalyzer()
     //analyzer.init
@@ -108,6 +113,7 @@ object Main extends LazyLogging {
     )
     */
 
+   /*
     var lineNum = 0
     val analyzerSpark = analyzerSparkSc.flatMap(
       line => {
@@ -132,6 +138,7 @@ object Main extends LazyLogging {
     //testSpark.saveAsTextFile(rstHdfs)
     analyzerSpark.saveAsTextFile(rstHdfs)
     sc.stop()
+    */
     //testSpark.saveAsTextFile(testSparkHdfs)
     //println(simulateExtractWordProcess("aab"))
 
@@ -276,18 +283,20 @@ object Main extends LazyLogging {
     return topicTree(pmid) contains matched
   }
 
-  def runTopic(analyzedOut:String): Unit = {
+  def runTopic(analyzedOut:String, pmidTopicFile:String): Unit = {
     val conn = new Connector()
+    val pmidTable = "focus_pmid"
+    /*
     val uniqPmidOut = "./data/uniq_pmid"
     conn.generatePmidFocus(analyzedOut, uniqPmidOut)
     logger.info("pmidFocus generated")
 
-    val pmidTable = "focus_pmid"
-    val pmidTopicFile = "./data/pmid_topic"
+    //val pmidTopicFile = "./data/pmid_topic"
     conn.createPmidFocusTable(pmidTable)
     logger.info("focus_pmid created")
     conn.insertRecords(uniqPmidOut, pmidTable)
     logger.info("insert finished")
+    */
     conn.runTopic(pmidTable, pmidTopicFile)
     logger.info("topic finished")
   }
