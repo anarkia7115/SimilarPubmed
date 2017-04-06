@@ -151,9 +151,9 @@ class Algorithm {
    *  2. is_topic
    * */
   def calcSimilarity(
-      m_length: Int, 
+      m_length: Int, // current abstract length
       smallPostingList: Map[String, (Int, Boolean)], 
-      countMap: Map[String, Map[Int, Int]], 
+      countMap: Map[String, Map[Int, Int]], //postinglist
       lengthMap: Map[Int, Int], 
       idfMap: Map[String, Double], 
       nDoc: Int

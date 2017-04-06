@@ -27,6 +27,15 @@ import java.io._
 
 object Main extends LazyLogging {
   def main(args: Array[String]): Unit = {
+    val onePmid = 25592537
+    val df = new sparkutil.Dataframe()
+    val ha = new algorithms.HigherAnalysis(df.spark, df.loadPostingListDf)
+    val similarityDf = ha.main(onePmid, df.absDf, df.meshDf, df.fuzzyDf)
+    val similarityPath = "/home/shawn/fast_data/umls/similarity"
+    similarityDf.write.format("parquet").save(similarityPath)
+  }
+
+  def localWorks():Unit = {
     // 1. compare words
     //val cw = new CompareWords()
     //cw.main
@@ -78,7 +87,7 @@ object Main extends LazyLogging {
     val meshFile = "./data/mesh_apr4.txt"
     val conn = new Connector()
     //conn.runAbs(absFile)
-    runTopic(absFile, meshFile)
+    //runTopic(absFile, meshFile)
 
     /*
     val inputAbsFile = args(0)
@@ -169,6 +178,7 @@ object Main extends LazyLogging {
       findSimilarPmids(pmid, conn, al, countMap, lengthMap, nDoc, idfMap, outputFile)
     }
     */
+
   }
 
   def simulateExtractWordProcess(line:String): 
