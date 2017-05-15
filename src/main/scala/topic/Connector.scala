@@ -88,6 +88,37 @@ class Connector {
     //connection.close
   }
 
+  def runTopicAll(outputFile:String): Unit = {
+    val query = """
+    select b.pmid, b.descriptor_name, b.descriptor_name_major_yn
+    from medline_mesh_heading b
+    """
+    val rs = execQuery(query)
+    val pw = new PrintWriter(new File(outputFile))
+
+    var lineNum = 0
+
+    while(rs.next) {
+      val pmid = rs.getString("pmid")
+      val descName = rs.getString("descriptor_name")
+      val descMajorName = rs.getString("descriptor_name_major_yn")
+
+      pw.write(pmid + "\t" + descName + "\t" + descMajorName + "\n")
+      lineNum += 1
+      //println(lineNum)
+
+      if (lineNum % 10000 == 0){
+        println("%s lines writed to %s".format(lineNum, outputFile))
+      }
+      //print(pmid + ": " + absText)
+      //println("[xml label]: %s".format(absXml.label))
+      //println("[pmid]: %s".format(pmid))
+      //println("[abstract_text]: %s".format(absText))
+    }
+    println("%s lines writed to %s".format(lineNum, outputFile))
+    pw.close
+    //connection.close
+  }
   def runTopic(pmidTable:String, 
       outputFile:String): Unit = {
     val query = """
@@ -163,6 +194,7 @@ class Connector {
 
     val rs = execQuery(query)
     var absText = ""
+    val xtr = new XmlTagRemover("AbstractText")
 
     if(rs.next){
     //val pmid = rs.getString("pmid").toInt
@@ -172,7 +204,7 @@ class Connector {
       absText = ""
     }
     rs.close
-    return absText
+    return xtr.trim(absText)
   }
 
   def runOneTopic(pmid:Int):List[String] = {
@@ -252,9 +284,8 @@ class Connector {
     SELECT pmid, abstract_text
     FROM medline_citation
     WHERE abstract_text != ''
-    LIMIT %s
     ;
-    """.format(limitNum)
+    """
 
     val rs = execQuery(query)
     val xtr = new XmlTagRemover("AbstractText")

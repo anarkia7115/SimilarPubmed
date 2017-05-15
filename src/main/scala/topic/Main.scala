@@ -7,13 +7,16 @@ package topic
 //import org.slf4j.LoggerFactory
 //import grizzled.slf4j.{Logger, Logging}
 
+import java.io._
+
 import com.typesafe.scalalogging.LazyLogging
+
 import scala.collection._
 import scala.collection.mutable.ListBuffer
-import org.apache.spark.SparkContext
-import org.apache.spark.SparkConf
-import scala.xml._
-import java.io._
+
+import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.SparkSession
+
 //import org.slf4j.LoggerFactory
 //import org.slf4j.impl.SimpleLogger
 
@@ -27,15 +30,52 @@ import java.io._
 
 object Main extends LazyLogging {
   def main(args: Array[String]): Unit = {
-    val onePmid = 25592537
     val df = new sparkutil.Dataframe()
-    val ha = new algorithms.HigherAnalysis(df.spark, df.loadPostingListDf)
-    val similarityDf = ha.main(onePmid, df.absDf, df.meshDf, df.fuzzyDf)
-    val similarityPath = "/home/shawn/fast_data/umls/similarity"
-    similarityDf.write.format("parquet").save(similarityPath)
+    df.genPostingList()
   }
 
-  def localWorks():Unit = {
+  def bagOfWordsProcess(): Unit = {
+  }
+
+  def downloadAllFromMysql():Unit = {
+    val absFile = "./data/abs_all.txt"
+    val meshFile = "./data/mesh_all.txt"
+    val conn = new Connector()
+    conn.runAbs(absFile)
+    conn.runTopicAll(meshFile)
+  }
+
+  def runRankedSimilarPubmed():Unit = {
+    val currPmidList = List(
+      27040497,
+      27783602,
+      25592537,
+      24742783,
+      20038531,
+      24460801,
+      22820290,
+      23716660,
+      26524530,
+      26317469
+    )
+    val df = new sparkutil.Dataframe()
+    val ha = new algorithms.AdvancedAnalysis(df.spark, df.loadPostingListDf)
+    val nDoc = ha.docNumber
+    //val similarityDf = ha.main(currPmidList, df.absDf, df.meshDf, df.fuzzyDf, nDoc)
+    val similarityDf = df.spark.read.load("./data/similarityDf")
+    val sumSimilarityDf = ha.sumSimilarity(similarityDf)
+    val rankedSimilarResult = ha.rankAndCollect(sumSimilarityDf)
+
+
+    val al = new Algorithm()
+    val conn = new Connector()
+    val resultFolder = "./data/result_all_abs"
+    //sortDfResult(al, conn, rankedSimilarResult, resultFolder)
+    val relatedMeshTable = ha.loadRelatedMeshTable()
+    //sortDfResult(al, conn, df.spark, relatedMeshTable, rankedSimilarResult, resultFolder)
+  }
+
+  def localWorks(): Unit = {
     // 1. compare words
     //val cw = new CompareWords()
     //cw.main
@@ -45,7 +85,6 @@ object Main extends LazyLogging {
     // 3. calculate pmid length
     //val pl = new PmidLength()
     //pl.main
-    //logger.info("what the fuck!")
 
     // 4. test Connector
     //val conn = new Connector()
@@ -122,32 +161,32 @@ object Main extends LazyLogging {
     )
     */
 
-   /*
-    var lineNum = 0
-    val analyzerSpark = analyzerSparkSc.flatMap(
-      line => {
-        val fq = new FileQueue("/tmp/portQueue", 8066 to 8071)
-        lineNum += 1
-        val k = line.split("\t")(0)
-        val v = line.split("\t")(1)
-        val p = fq.borrowOne
-        while (p == 0) {
+    /*
+     var lineNum = 0
+     val analyzerSpark = analyzerSparkSc.flatMap(
+       line => {
+         val fq = new FileQueue("/tmp/portQueue", 8066 to 8071)
+         lineNum += 1
+         val k = line.split("\t")(0)
+         val v = line.split("\t")(1)
+         val p = fq.borrowOne
+         while (p == 0) {
 
-          println("ports are full, waiting for new")
-          Thread sleep 1000
-          val p = fq.borrowOne
-        }
-        val analyzer = new ConceptAnalyzer(p)
-        val rst = analyzer.process(v).map(vv => (k, vv))
-        fq.returnOne(p)
-        println("processed %s".format(lineNum))
-        rst
-      }
-    )
-    //testSpark.saveAsTextFile(rstHdfs)
-    analyzerSpark.saveAsTextFile(rstHdfs)
-    sc.stop()
-    */
+           println("ports are full, waiting for new")
+           Thread sleep 1000
+           val p = fq.borrowOne
+         }
+         val analyzer = new ConceptAnalyzer(p)
+         val rst = analyzer.process(v).map(vv => (k, vv))
+         fq.returnOne(p)
+         println("processed %s".format(lineNum))
+         rst
+       }
+     )
+     //testSpark.saveAsTextFile(rstHdfs)
+     analyzerSpark.saveAsTextFile(rstHdfs)
+     sc.stop()
+     */
     //testSpark.saveAsTextFile(testSparkHdfs)
     //println(simulateExtractWordProcess("aab"))
 
@@ -181,27 +220,27 @@ object Main extends LazyLogging {
 
   }
 
-  def simulateExtractWordProcess(line:String): 
-    List[(String, String, String, String)] = {
-      val rst = ListBuffer[(String, String, String, String)]()
-      for(xx <- 1 to 5){
-        val xline = line + xx
-        val yl = (
-          xline + 1,
-          xline + 2,
-          xline + 3,
-          xline + 4
+  def simulateExtractWordProcess(line: String):
+  List[(String, String, String, String)] = {
+    val rst = ListBuffer[(String, String, String, String)]()
+    for (xx <- 1 to 5) {
+      val xline = line + xx
+      val yl = (
+        xline + 1,
+        xline + 2,
+        xline + 3,
+        xline + 4
         )
-        rst += yl
-      }
-      return rst.toList
+      rst += yl
+    }
+    return rst.toList
   }
 
-  def sortResult(al:Algorithm, conn:Connector):Unit = {
+  def sortResult(al: Algorithm, conn: Connector): Unit = {
     val pmidList = List(27040497, 27783602, 25592537, 24742783, 20038531, 24460801, 22820290, 23716660, 26524530, 26317469)
 
     // sort result
-    import java.nio.file.{Paths, Files}
+    import java.nio.file.{Files, Paths}
     for (pmid <- pmidList) {
       //val onePmid = "24742783"
       //val fileWithTopic = "./data/raw_result/%s.txt".format(pmid)
@@ -210,19 +249,19 @@ object Main extends LazyLogging {
       val fileNoTopicSort = "./data/sorted/%s_no_topic.txt".format(pmid)
       val fileResultWithTopic = "./data/result/%s.txt".format(pmid)
       val fileResultNoTopic = "./data/result/%s_no_topic.txt".format(pmid)
-      if(Files.exists(Paths.get(fileWithTopicSort))) {
+      if (Files.exists(Paths.get(fileWithTopicSort))) {
         al.addAbsAnnotation(
-          pmid, 
-          fileWithTopicSort, 
+          pmid,
+          fileWithTopicSort,
           fileResultWithTopic,
           10,
           conn
         )
       }
-      if(Files.exists(Paths.get(fileNoTopicSort))) {
+      if (Files.exists(Paths.get(fileNoTopicSort))) {
         al.addAbsAnnotation(
-          pmid, 
-          fileNoTopicSort, 
+          pmid,
+          fileNoTopicSort,
           fileResultNoTopic,
           10,
           conn
@@ -231,18 +270,63 @@ object Main extends LazyLogging {
     }
   }
 
+  def sortDfResult(al: Algorithm,
+                   conn: Connector,
+                   spark: SparkSession,
+                   relatedMeshTable: DataFrame,
+                   rankedSimilarResult: Array[(Int, List[(Int, Double)])],
+                   resultFolder:String
+                  ): Unit = {
+    // sort result
+    import java.nio.file.{Files, Paths}
+
+    for ((pmid, relatedList) <- rankedSimilarResult) {
+
+      val fileResultWithTopic = "%s/%s.txt".format(resultFolder, pmid)
+
+      al.addAbsAnnotation(
+        pmid,
+        relatedList,
+        spark,
+        relatedMeshTable,
+        fileResultWithTopic,
+        conn
+      )
+    }
+  }
+
+  def sortDfResult(al: Algorithm,
+                   conn: Connector,
+                   rankedSimilarResult: Array[(Int, List[(Int, Double)])],
+                   resultFolder:String
+                  ): Unit = {
+    // sort result
+    import java.nio.file.{Files, Paths}
+    for ((pmid, relatedList) <- rankedSimilarResult) {
+
+      val fileResultWithTopic = "%s/%s.txt".format(resultFolder, pmid)
+
+      al.addAbsAnnotation(
+        pmid,
+        relatedList,
+        fileResultWithTopic,
+        conn
+      )
+    }
+  }
+
   def findSimilarPmids(
-    pmid: Int, 
-    conn: Connector, 
-    al: Algorithm, 
-    countMap: Map[String, Map[Int, Int]], 
-    lengthMap: Map[Int, Int], 
-    nDoc: Int, 
-    idfMap: Map[String, Double], 
-    outputFile: String): Unit = {
+                        pmid: Int,
+                        conn: Connector,
+                        al: Algorithm,
+                        countMap: Map[String, Map[Int, Int]],
+                        lengthMap: Map[Int, Int],
+                        nDoc: Int,
+                        idfMap: Map[String, Double],
+                        outputFile: String): Unit = {
 
     val absTxt = conn.runOneAbs(pmid)
-    if(absTxt == "") {
+    if (absTxt == "") {
       println("%s no abstract".format(pmid))
       return
     }
@@ -253,9 +337,9 @@ object Main extends LazyLogging {
     val smallMeshResult = ca.process(absTxt)
 
     val smallPostingList = al.createSmallPostingList(
-        smallTopicList, 
-        smallMeshResult
-        )
+      smallTopicList,
+      smallMeshResult
+    )
 
     val m_length = al.getAbsLength(absTxt)
     val targetPostingList = smallPostingList
@@ -263,13 +347,13 @@ object Main extends LazyLogging {
 
     println("calculate resultMap")
     val resultMap = al.calcSimilarity(
-      m_length, 
+      m_length,
       targetPostingList,
-      countMap, 
-      lengthMap, 
-      idfMap, 
+      countMap,
+      lengthMap,
+      idfMap,
       nDoc
-      )
+    )
     println(resultMap.size)
     val pw = new PrintWriter(new File(outputFile))
     for ((k, v) <- resultMap) {
@@ -279,13 +363,13 @@ object Main extends LazyLogging {
   }
 
   def testPostingList(
-      postingList: mutable.Map[String, ListBuffer[(Int, Int, Boolean)]]): 
-      Unit = {
+                       postingList: mutable.Map[String, ListBuffer[(Int, Int, Boolean)]]):
+  Unit = {
     val meshId = "C0039829"
     println(postingList(meshId))
   }
 
-  def testTopicTree(pmid:Int): Boolean = {
+  def testTopicTree(pmid: Int): Boolean = {
     val al = new Algorithm()
     val topicFile = "./data/pmid_topic"
     val topicTree = al.createTopicTree(topicFile)
@@ -293,7 +377,7 @@ object Main extends LazyLogging {
     return topicTree(pmid) contains matched
   }
 
-  def runTopic(analyzedOut:String, pmidTopicFile:String): Unit = {
+  def runTopic(analyzedOut: String, pmidTopicFile: String): Unit = {
     val conn = new Connector()
     val pmidTable = "focus_pmid"
     /*

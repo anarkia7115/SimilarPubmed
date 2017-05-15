@@ -10,6 +10,12 @@ import scala.math.pow
 import scala.collection.immutable.ListMap
 import java.io._
 
+import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.functions.desc
+
+import utils.Tabulator
+
 class Algorithm {
   def calcIdf(postingList: Map[String, ListBuffer[(Int, Int, Boolean)]], nDoc:Int): 
       Map[String, Double] = {
@@ -117,6 +123,92 @@ class Algorithm {
         lineNum += 1
         if(lineNum >= limitLine) break
       }
+    }
+    pw.close
+  }
+
+  def addAbsAnnotation(
+                        currpmid: Int,
+                        inputArray: List[(Int, Double)],
+                        spark:SparkSession, 
+                        relatedMeshTable:DataFrame,
+                        outputFile:String,
+                        conn:Connector):Unit = {
+
+    import spark.implicits._
+    val xtr = new XmlTagRemover("AbstractText")
+    val pw = new PrintWriter(new File(outputFile))
+    val (aTitle, absTxtData) = conn.runOneTitleAbs(currpmid)
+    val absTxt = xtr.trim(absTxtData)
+    pw.write(
+      """|Origin Artile PMID: %s
+        |Title: %s
+        |Abstract: %s
+        |
+        |""".stripMargin.format(currpmid, aTitle, absTxt))
+
+    var lineNum = 0
+    for(line <- inputArray) {
+      val relpmid = line._1
+      val score = line._2
+
+      val meshTableToPrint = relatedMeshTable
+        .filter($"curpmid" === currpmid and $"relpmid" === relpmid)
+        .sort(desc("score"))
+        .select("mesh", "curscore", "relscore", "score")
+      val meshStringToPrint = Tabulator
+        .format(
+          Seq(meshTableToPrint.columns.toSeq) 
+          ++ meshTableToPrint.collect.toSeq.map(s => s.toSeq)
+        )
+
+      val (aTitle, absTxtData) = conn.runOneTitleAbs(relpmid)
+      val absTxt = xtr.trim(absTxtData)
+      pw.write(
+        """|Related Artile PMID: %s, Score: %s
+          |Title: %s
+          |Abstract: %s
+          |
+          |%s
+          |
+          |
+          |""".stripMargin.format(relpmid, score, aTitle, absTxt, meshStringToPrint))
+      lineNum += 1
+    }
+    pw.close
+  }
+
+
+  def addAbsAnnotation(
+                        currpmid: Int,
+                        inputArray: List[(Int, Double)],
+                        outputFile:String,
+                        conn:Connector):Unit = {
+
+    val xtr = new XmlTagRemover("AbstractText")
+    val pw = new PrintWriter(new File(outputFile))
+    val (aTitle, absTxtData) = conn.runOneTitleAbs(currpmid)
+    val absTxt = xtr.trim(absTxtData)
+    pw.write(
+      """|Origin Artile PMID: %s
+        |Title: %s
+        |Abstract: %s
+        |
+        |""".stripMargin.format(currpmid, aTitle, absTxt))
+
+    var lineNum = 0
+    for(line <- inputArray) {
+      val relpmid = line._1
+      val score = line._2
+      val (aTitle, absTxtData) = conn.runOneTitleAbs(relpmid)
+      val absTxt = xtr.trim(absTxtData)
+      pw.write(
+        """|Related Artile PMID: %s, Score: %s
+          |Title: %s
+          |Abstract: %s
+          |
+          |""".stripMargin.format(relpmid, score, aTitle, absTxt))
+      lineNum += 1
     }
     pw.close
   }

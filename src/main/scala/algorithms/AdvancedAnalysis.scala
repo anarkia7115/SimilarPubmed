@@ -9,17 +9,22 @@ import sparkutil.MeshFuzzy
 import sparkutil.PostingList
 import sparkutil.Abstract
 import scala.math
+import scala.collection.mutable.ListBuffer
 
-class HigherAnalysis(spark:SparkSession, postingListDf:DataFrame) {
+class AdvancedAnalysis(spark:SparkSession, postingListDf:DataFrame) {
   import spark.implicits._
+
+  //var nDoc:Long = 0
 
   // distinctPmids
   def docNumber(): Long = {
 
-    return postingListDf.as[PostingList].map(attrs => (attrs.pmid, 0)).rdd.reduceByKey(_ + _).count
+    //return postingListDf.as[PostingList].map(attrs => (attrs.pmid, 0)).rdd.reduceByKey(_ + _).count
+    return postingListDf.select("pmid").distinct.count
   }
 
-  def idf(nDoc:Double): DataFrame = {
+  def idf(nDoc:Long): DataFrame = {
+
     val idfDf = postingListDf.as[PostingList]
       .map(attrs => (attrs.mesh, 1))
       .rdd.reduceByKey(_ + _)
@@ -37,14 +42,40 @@ class HigherAnalysis(spark:SparkSession, postingListDf:DataFrame) {
     return lengthDf
   }
 
-  def currMeshFreq(onePmid:Int, meshDf:DataFrame, fuzzyDf:DataFrame):DataFrame = {
+  def currMeshFreq(currPmidList:List[Int], meshDf:DataFrame, fuzzyDf:DataFrame):DataFrame = {
 
     val conn = new Connector()
-    val oneAbs = conn.runOneAbs(onePmid).trim
-    val oneTopicList = conn.runOneTopic(onePmid)
-    val oneTopicDf = oneTopicList.toDF("mesh")
-    val focusedFuzzy = fuzzyDf.alias("a").join(oneTopicDf.alias("b"), $"a.mesh" === $"b.mesh", "inner").select($"a.mesh", $"a.fuzzy")
-    val resultDf = focusedFuzzy
+    //val currAbsList = ListBuffer[(Int, String)]
+    //val oneAbs = conn.runOneAbs(onePmid).trim
+    //val oneTopicDf = oneTopicList.toDF("mesh")
+
+    //val oneTopicList = conn.runOneTopic(onePmid)
+    val currAbsList   = currPmidList.map(pmid => (pmid, conn.runOneAbs(pmid)))
+    val currTopicList = currPmidList.map(pmid => (pmid, conn.runOneTopic(pmid))) .flatMap({case (pmid:Int, arrayTopic:List[String]) => arrayTopic.map(topic => (pmid, topic)) })
+    val currAbsDf =   currAbsList.toDF(  "pmid", "abs")
+    val currTopicDf = currTopicList.toDF("pmid", "mesh")
+
+    val resultDf = currAbsDf.alias("abs")
+      .join(currTopicDf.alias("topic"), $"topic.pmid" === $"abs.pmid")
+      .select($"abs.pmid", $"abs.abs", $"topic.mesh")
+      .alias("mesh")
+      .join(fuzzyDf.alias("fuzzy"), $"mesh.mesh" === $"fuzzy.mesh")
+      .select($"mesh.pmid", $"mesh.abs", $"mesh.mesh", $"fuzzy.fuzzy")
+      .map(attrs => (
+        (attrs.getAs[String]("mesh"),
+         attrs.getAs[Int]("pmid")), /*keys*/
+        SerializableClass.countSubstring(attrs.getAs[String]("abs"),
+         attrs.getAs[String]("fuzzy")) /*value*/
+      ))
+      .rdd.reduceByKey(_ + _)
+      .map({
+        case ((mesh, pmid), count) =>
+        (mesh, pmid, count)
+      }).toDF("mesh", "pmid", "count")
+
+    /*
+    //val focusedFuzzy = fuzzyDf.alias("a").join(oneTopicDf.alias("b"), $"a.mesh" === $"b.mesh", "inner").select($"a.mesh", $"a.fuzzy")
+    val resultDf = fuzzyDf
       .map(attr => (
         (onePmid
         , attr.getAs[String]("mesh"))
@@ -57,12 +88,13 @@ class HigherAnalysis(spark:SparkSession, postingListDf:DataFrame) {
         (pmid, mesh, count)
       })
       .toDF("pmid", "mesh", "count")
+    */
 
     return resultDf
   }
 
   def similarity(
-    onePmid:Int, 
+    currPmidList:List[Int], 
     currMeshFreqDf: DataFrame, 
     lenDf: DataFrame,
     idfDf: DataFrame
@@ -75,8 +107,10 @@ class HigherAnalysis(spark:SparkSession, postingListDf:DataFrame) {
     idfDf.createOrReplaceTempView("meshidf")
 
     val conn = new topic.Connector()
-    val currLen = conn.runOneAbs(onePmid).split(" ").size
-    val currLenDf = List((onePmid, currLen)).toDF("pmid", "length")
+    val currLen = currPmidList.map(pmid => (pmid, conn.runOneAbs(pmid).split(" ").size))
+    //val currLen = conn.runOneAbs(onePmid).split(" ").size
+    val currLenDf = currLen.toDF("pmid", "length")
+    //val currLenDf = List((onePmid, currLen)).toDF("pmid", "length")
     currLenDf.createOrReplaceTempView("currabslength")
     /*
     val currDataDf = 
@@ -113,16 +147,6 @@ class HigherAnalysis(spark:SparkSession, postingListDf:DataFrame) {
         , "curidf"
         , "relidf")
     */
-
-    val q1 = """
-      SELECT ps.mesh
-      , pb.pmid as relpmid
-      , ps.count as curcount
-      , pb.count as relcount
-      from currPostingList ps
-      join bigPostingList pb
-        on ps.mesh = pb.mesh
-    """
 
     val query = """
       SELECT ps.mesh
@@ -166,7 +190,7 @@ class HigherAnalysis(spark:SparkSession, postingListDf:DataFrame) {
     return similarityDf
   }
 
-  def sumSimilarity(similarityDf):DataFrame = {
+  def sumSimilarity(similarityDf:DataFrame):DataFrame = {
     val sumSimilarityDf = similarityDf.map(attrs => (
       (attrs.getAs[Int]("curpmid"),
       attrs.getAs[Int]("relpmid")), /* key */
@@ -177,18 +201,47 @@ class HigherAnalysis(spark:SparkSession, postingListDf:DataFrame) {
         ((curpmid, relpmid), score) =>
         (curpmid, relpmid, score)
       })
-      .toDF("curpmid", "redpmid", "score")
+      .toDF("curpmid", "relpmid", "score")
     return sumSimilarityDf
   }
 
-  def main(onePmid:Int, absDf:DataFrame, meshDf:DataFrame, fuzzyDf:DataFrame):DataFrame = {
-    val currMeshFreqDf = currMeshFreq(onePmid, meshDf, fuzzyDf)
+  def main(currPmidList:List[Int], absDf:DataFrame, meshDf:DataFrame, fuzzyDf:DataFrame, nDoc:Long):DataFrame = {
+    val currMeshFreqDf = currMeshFreq(currPmidList, meshDf, fuzzyDf)
     val lenDf = absLength(absDf)
-    val nDoc = docNumber()
+    //val nDoc = docNumber()
     val idfDf = idf(nDoc)
-    val similarityDf = similarity(onePmid, currMeshFreqDf, lenDf, idfDf)
+    val similarityDf = similarity(currPmidList, currMeshFreqDf, lenDf, idfDf)
 
     return similarityDf
+  }
+
+  def rankAndCollect(sumSimilarityDf:DataFrame):Array[(Int, List[(Int, Double)])]= {
+    import org.apache.spark.sql.expressions.Window
+    import org.apache.spark.sql.functions.{rank, desc}
+
+    val w = Window.partitionBy($"curpmid").orderBy(desc("score"))
+    val ranked = sumSimilarityDf
+      .withColumn("rank", rank.over(w))
+      .where($"rank" <= 10)
+
+      /*
++--------+--------+------------------+----+
+| curpmid| relpmid|             score|rank|
++--------+--------+------------------+----+
+       * */
+
+    val rankedSimilarResult = ranked.map(
+      attrs => (attrs.getAs[Int]("curpmid"), /* key */
+        List((attrs.getAs[Int]("relpmid")
+          , attrs.getAs[Double]("score"))) /* value */
+        )).rdd
+      .reduceByKey(_ ++ _).collect
+
+    return rankedSimilarResult
+  }
+
+  def loadRelatedMeshTable():DataFrame = {
+    spark.read.load("./data/related_mesh_table.parquet")
   }
 
 }
