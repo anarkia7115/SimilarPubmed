@@ -2,13 +2,16 @@ package render
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.SparkContext
+import org.apache.spark.sql.SparkSession
 
 /*
  * Input: [pmid title absText]
  * */
-class CleanDocs(inputPath:String) {
+class CleanDocs(inputPath:String, spark:SparkSession) {
 
-  def getRdd(sc:SparkContext):RDD = {
+  def getRdd():RDD[(Int, String, String)] = {
+    val sc = spark.sparkContext
+    val xtr = new topic.XmlTagRemover("AbstractText")
     val textRdd = sc.textFile(inputPath)
     val cleanRdd = textRdd.flatMap { line =>
       val fields = line.trim.split('\t')
@@ -19,6 +22,7 @@ class CleanDocs(inputPath:String) {
         Some((pmid, title, absText))
       }
     }
+    return cleanRdd
   }
 
 }

@@ -1,4 +1,11 @@
-class Weights{
+package algorithms
+
+import scala.collection._
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.SparkSession
+class Weights(spark:SparkSession) extends java.io.Serializable {
+  import spark.implicits._
 
   def scoreVec(termFreqs:Map[String, Int], idfs:Map[String, Double], termIds:immutable.Map[String, Int]):Seq[(Int, Double)] = {
     val eta = 1.0
@@ -58,9 +65,13 @@ class Weights{
     tfByDocs:DataFrame
     , idfs:Map[String, Double]
     , termIds:immutable.Map[String, Int]
-  ): DataFrame = {
-    val mat = tfByDocs.flatMap{case (pmid, termFreqs) => {
+  ): DataFrame= {
+    val mat = tfByDocs.flatMap(attrs => {
+      val pmid = attrs.getInt(0)
+      val termFreqs = attrs.getMap[String, Int](1)
       scoreMat(termFreqs, pmid, idfs, termIds)
-    }}
+    }).toDF("term_id", "pmid", "weight")
+    return mat
+    //.toDF("term_id", "pmid", "score")
   }
 }

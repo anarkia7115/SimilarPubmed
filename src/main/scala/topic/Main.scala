@@ -1,7 +1,6 @@
 /**
   * Created by shawn on 2/20/17.
   */
-
 package topic
 
 //import org.slf4j.LoggerFactory
@@ -14,8 +13,16 @@ import com.typesafe.scalalogging.LazyLogging
 import scala.collection._
 import scala.collection.mutable.ListBuffer
 
+import org.apache.spark.mllib.linalg.{Vector, Vectors}
+import org.apache.spark.mllib.linalg.{Matrix, Matrices}
+import org.apache.spark.mllib.linalg.distributed.{BlockMatrix, CoordinateMatrix, MatrixEntry, IndexedRowMatrix, RowMatrix}
+import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.rdd.RDD
+import org.apache.spark.SparkContext
+
 
 //import org.slf4j.LoggerFactory
 //import org.slf4j.impl.SimpleLogger
@@ -28,13 +35,847 @@ import org.apache.spark.sql.SparkSession
   * Created by shawn on 2/13/17.
   */
 
+case class HdfsAlreadyExistsException(fp:String) extends Exception(
+  fp + " already exists!")
+
+case class TermDocWeight(term_id:Int, pmid:Int, weight:Double)
+case class PpScore(src_pmid:Int, rel_pmid:Int, score:Double)
+
 object Main extends LazyLogging {
+  val spark = SparkSession
+    .builder
+    .appName("Matrix Multiply")
+    .config("spark.master", "spark://hpc2:7077")
+    .getOrCreate()
+  import spark.implicits._
+
   def main(args: Array[String]): Unit = {
-    val df = new sparkutil.Dataframe()
-    df.genPostingList()
+    bigMatWithTopTerms()
+  }
+  def chunkAnalyzeProcess(args: Array[String]): Unit = {
+    val sc = spark.sparkContext
+
+    val hdfsRoot = "hdfs://hpc2:9000"
+    val pmidRangePath = hdfsRoot + "/raw/pmid_range_may10.txt"
+    val leftRange = 0
+    val numCandidates = 101
+    val numOfPartitions = args(0).toInt
+    val srcLimit        = args(1).toInt
+    val chunkSize       = args(2).toInt
+    val pmidRangeDf = spark.read.textFile(pmidRangePath).
+      map(_.toInt).
+      toDF("pmid").limit(srcLimit)
+
+    val pmidRange = pmidRangeDf.as[Int].collect
+
+    val twByPmid = spark.read.load(hdfsRoot + "/data/twByPmidDf")
+    twByPmid.cache
+
+    val pmidChunks = pmidRange.grouped(chunkSize).toList
+
+    var i = 0
+    pmidChunks.foreach(chunk => {
+      val ppScoreChunk = analyzeAndSort(
+        twByPmid, 
+        chunk, 
+        numOfPartitions, 
+        numCandidates)
+      ppScoreChunk.write.save(hdfsRoot + 
+        "/data/ppScoreChunks/chunk_%s".format(i.toString))
+      i += 1
+    })
   }
 
-  def bagOfWordsProcess(): Unit = {
+  def unionAll(chunksPath:String, hdfsOutPath:String): Dataset[PpScore] = {
+    val sc = spark.sparkContext
+    import org.apache.hadoop.fs.FileSystem
+    import org.apache.hadoop.fs.Path
+    val hfArray = FileSystem.get(sc.hadoopConfiguration).
+      listStatus(new Path(chunksPath))
+
+    val dsArray = hfArray.filter(_.isDirectory).map(hf => {
+
+      val hfPath = hf.getPath
+      spark.read.load(hfPath.toString).as[PpScore]
+    })
+
+    val unionedDs = sc.union(dsArray.map(_.rdd)).toDS
+    //unionedDs.write.save(hdfsOutPath)
+    unionedDs
+  }
+
+  def analyzeAndSort(
+    twByPmid:DataFrame, 
+    chunk: Array[Int], 
+    numOfPartitions:Int, 
+    numCandidates:Int): Dataset[PpScore] = {
+
+    val sc = spark.sparkContext
+    val pmidRangeDf = sc.parallelize(chunk).toDF("pmid")
+    val smallTwByPmid = pmidRangeDf.
+      join(twByPmid.as("b"), "pmid").
+      select("pmid", "tw").
+      as[(Int, Map[Int, Double])].collect
+    val bSmallTw = sc.broadcast(smallTwByPmid)
+
+    // Calculate score between every pair of pmids
+    val ppScores = twByPmid.repartition(numOfPartitions).flatMap( attrs => {
+      val pmid = attrs.getInt(0)
+      val tw = attrs.getMap[Int, Double](1)
+
+      // Loop in Focused pmid_tw
+      val smallPpScores = bSmallTw.value.map{ case (pmid2, tw2) => {
+        // Init pmid-pmid score
+        var ppScore = 0.0
+        tw.foreach{ case (t1, w1) => {
+          // check if term_id in range
+          val w2 = tw2.getOrElse(t1, 0.0)
+          // accumulate ppScore
+          ppScore += w1 * w2
+        }}
+        (pmid2, ppScore)
+      }}
+      smallPpScores.map{ case (pmid2, ppScore) => {
+        (pmid2, pmid, ppScore)
+      }}
+    }).toDF("src_pmid", "rel_pmid", "score").as[PpScore]
+
+    //val numCandidates = 101
+
+    val groupedPpScore = ppScores.mapPartitions(part => {
+      part.toSeq.groupBy(_.src_pmid).map{case (k, v) => {
+        v.sortBy(-_.score).take(numCandidates)
+      }}.flatten.toIterator
+    }).as[PpScore]
+
+    val rk = new algorithms.Rank[PpScore]()
+    val ranked = rk.rank(groupedPpScore, "src_pmid", "score").as[PpScore]
+    return ranked.filter($"rank" <= numCandidates)
+    //ranked.filter($"rank" <= 101).write.save(hdfsRoot + "/data/ppRankedScores")
+    //ppScores.write.save(hdfsRoot + "/data/ppRankedScores")
+
+    /*
+    val smallTwByPmid = smallMat.map(attrs => 
+      (attrs.pmid, Map(attrs.term_id, attrs.weight))
+    ).rdd.reduceByKey(_ ++ _).collectAsMap
+    */
+
+    /*
+    val twByPmid = mat.map(attrs => 
+      (attrs.pmid, Map(attrs.term_id, attrs.weight))
+    ).rdd.reduceByKey(_ ++ _)
+
+    twByPmid.toDF("pmid", "tw").write.save(hdfsRoot + "/data/twByPmid")
+    */
+    
+  }
+
+  def multiplyTest(args: Array[String]): Unit = {
+    val sc = spark.sparkContext
+    val hdfsRoot = "hdfs://hpc2:9000"
+    val pmidRangePath = hdfsRoot + "/raw/pmid_range_may10.txt"
+    val pmidRangeDf = spark.read.textFile(pmidRangePath).map(_.toInt).toDF("pmid").limit(10)
+
+    val mat = spark.read.load("hdfs://hpc2:9000/data/bigMatDf").as[TermDocWeight]
+    val smallMat = pmidRangeDf.join(mat.as("b"), "pmid").select("term_id", "pmid", "weight").as[TermDocWeight]
+    mat.cache
+    smallMat.cache
+
+    val smallPmidMap = indexSmallMat(smallMat)
+    val numSrc = smallPmidMap.size
+    val bSmallPmidMap = sc.broadcast(smallPmidMap)
+
+    val result = multiplyResultNoIndex(mat, smallMat, bSmallPmidMap)
+    result.rows.map(_.toArray).toDF.write.save(hdfsRoot + "/result/multiply_may22")
+    //println(result.numRows)
+  }
+
+  /*
+  def test2(args: Array[String]): Unit = {
+    val hdfsRoot = "hdfs://hpc2:9000"
+    val pmidRangePath = hdfsRoot + "/raw/pmid_range_may10.txt"
+    val pmidRangeDf = spark.read.textFile(pmidRangePath).map(_.toInt).limit(10).toDF("pmid")
+
+    val mat = spark.read.load("hdfs://hpc2:9000/data/bigMatDf").as[TermDocWeight]
+    val smallMat = pmidRangeDf.join(mat.as("b"), "pmid").as[TermDocWeight]
+    mat.cache
+    smallMat.cache
+    val pwByTermIdDf = mat.map (attrs => {
+      (attrs.term_id, List((attrs.pmid, attrs.weight)))
+    }).rdd.reduceByKey(_ ++ _).toDF("term_id", "weight_by_pmid")
+    val pwByTermIdDf = mat.map (attrs => {
+      (attrs.term_id, (attrs.pmid, attrs.weight))
+    }).aggregateByKey(ListBuffer)
+    //pMat = mat.repartition("pmid")
+    //pMat.fold(ListBuffer.empty[])
+    val pwByTermId = mat.map( attrs => 
+      (attrs.term_id, Map(attrs.pmid -> attrs.weight))
+    ).rdd.reduceByKey(
+      _ ++ _
+    )
+
+    val matByTermId = mat.groupByKey(attrs => {
+      attrs.term_id
+    })
+    
+    val pwByTermId = matByTermId.flatMapGroups{case (k, tdwIter) => {
+      val pwList = tdwIter.map( attrs => {
+        (attrs.pmid, attrs.weight)
+      })
+      Map(k -> pwList.toList)
+    }}
+
+    val kvRdd = pwByTermIdDf.as[(Int, Map[Int, Double])].rdd
+    kvRdd.cache
+
+    val pmidRangePath = hdfsRoot + "/raw/pmid_range_may10.txt"
+    val pmidRangeDf = spark.read.textFile(pmidRangePath).map(_.toInt).limit(10).toDF("pmid")
+
+    val smallMat = pmidRangeDf.join(mat.as("b"), "pmid").as[TermDocWeight]
+    val scores = smallMat.flatMap(attrs => {
+      val termId = attrs.term_id
+      val pmid = attrs.pmid
+      val weight = attrs.weight
+
+      val pwMap = kvRdd.lookup(termId)
+      val scoreList = pwMap.map{case (pmid2, weight2) => 
+      (pmid, pmid2, weight * weight2)}
+      scoreList.sortBy(-_._3).slice(0, 100)
+    })
+
+    val pwByTermIdDf = spark.read.load(hdfsRoot + "/data/pwByTermIdDf")
+
+    val result = smallMat.as("a").join(
+      pwByTermIdDf.as("b"), "term_id").
+      toDF("term_id", "pmid", "weight", "pmid_weight").cache.
+      map(attrs => { 
+        val term_id = attrs.getInt(0) 
+        val pmid = attrs.getInt(1) 
+        val weight = attrs.getDouble(2) 
+        val pmid_weight = attrs.getMap[Int, Double](3) 
+
+        val pmid_weight2 = pmid_weight.map{ case (pmid2, weight2) =>
+          (pmid2, weight2 * weight)
+        }
+        (pmid, pmid_weight2)
+      }).rdd.reduceByKey{case (m1, m2) => {
+        m1 ++ m2.map{case (k, v) =>
+          k -> (v + m1.getOrElse(k, 0.0))
+        }
+      }}.flatMap{ case (src_pmid, rel_pmid_weight) => {
+        val top100Scores = rel_pmid_weight.toSeq.sortBy(-_._2).slice(0, 100)
+        top100Scores.map{ case (rel_pmid, score) =>
+          (src_pmid, rel_pmid, score)
+        }
+      }}
+
+    val result2 = smallMat.as("a").join(
+      mat.as("b"), "term_id").
+      select("a.pmid", "b.pmid", "a.weight", "b.weight")
+      toDF("term_id", "pmid", "weight", "pmid_weight").cache.
+      map(attrs => { 
+        val term_id = attrs.getInt(0) 
+        val pmid = attrs.getInt(1) 
+        val weight = attrs.getDouble(2) 
+        val pmid_weight = attrs.getMap[Int, Double](3) 
+
+        val pmid_weight2 = pmid_weight.map{ case (pmid2, weight2) =>
+          (pmid2, weight2 * weight)
+        }
+        (pmid, pmid_weight2)
+      }).rdd.reduceByKey{case (m1, m2) => {
+        m1 ++ m2.map{case (k, v) =>
+          k -> (v + m1.getOrElse(k, 0.0))
+        }
+      }}.flatMap{ case (src_pmid, rel_pmid_weight) => {
+        val top100Scores = rel_pmid_weight.toSeq.sortBy(-_._2).slice(0, 100)
+        top100Scores.map{ case (rel_pmid, score) =>
+          (src_pmid, rel_pmid, score)
+        }
+      }}
+  }
+  */
+
+  /*
+  def test1(args: Array[String]): Unit = {
+    val hdfsRoot = "hdfs://hpc2:9000"
+    val pmidRangePath = hdfsRoot + "/raw/pmid_range_may10.txt"
+    val pmidRangeDf = spark.read.textFile(pmidRangePath).map(_.toInt).limit(10).toDF("pmid")
+
+    val mat = spark.read.load("hdfs://hpc2:9000/data/bigMatDf").as[TermDocWeight]
+    val smallMat = pmidRangeDf.join(mat.as("b"), "pmid").as[TermDocWeight]
+    //.select("term_id", "pmid", "weight")
+    val partitionedSmallMat = smallMat.repartition($"pmid")
+
+    val pr3 = multi.coordinateMatrixMultiply3(mat, partitionedSmallMat)
+    pr3.write.save(hdfsRoot + "/result/pr3")
+    
+    val twByPmid = mat.as[TermDocWeight].map(
+      attrs => (attrs.pmid, Map(attrs.term_id -> attrs.weight))
+    ).rdd.reduceByKey(_ ++ _)
+
+    val pwByTermId = mat.as[TermDocWeight].map(
+      attrs => (attrs.term_id, List((attrs.pmid, attrs.weight)))
+    ).rdd.reduceByKey(_ ++ _)
+
+    val smallPwByTermId = smallMat.as[TermDocWeight].map(
+      attrs => (attrs.term_id, List((attrs.pmid, attrs.weight)))
+    ).rdd.reduceByKey(_ ++ _)
+
+    pwByTermIdDf = pwByTermId.toDF("term_id", "weightByPmid")
+
+    pwByTermId.cache
+    smallPwByTermId.cache
+
+    val numTerms = mat.select("term_id").distinct.count
+
+    val lCoo = lMat2Coo(mat)
+    val lBm = lCoo.toBlockMatrix.cache
+    lBm.validate
+
+    val pmidId = smallMat.select("pmid").as[Int].distinct.collect.zipWithIndex.toMap
+    val bPmidId = sc.broadcast(pmidId)
+
+    val smallVecs = smallMat.map(attrs => 
+      MatrixEntry(attrs.term_id, bPmidId.value(attrs.pmid), attrs.weight)
+    )
+
+    val smallVecs = smallMat.map(attrs => 
+      MatrixEntry(attrs.term_id, bPmidId.value(attrs.pmid), attrs.weight)
+    )
+  }
+  */
+
+  def rankMultiplyResult(): Unit = {
+    val sc = spark.sparkContext
+    val hdfsRoot = "hdfs://hpc2:9000"
+    val pmidRangePath = hdfsRoot + "/raw/pmid_range_may10.txt"
+    val pmidRangeDf = spark.read.textFile(pmidRangePath).map(_.toInt).toDF("pmid").limit(10)
+
+    val mat = spark.read.load("hdfs://hpc2:9000/data/bigMatDf").limit(100).as[TermDocWeight]
+    val smallMat = pmidRangeDf.join(mat.as("b"), "pmid").select("term_id", "pmid", "weight").as[TermDocWeight]
+    mat.cache
+    smallMat.cache
+
+    val smallPmidMap = indexSmallMat(smallMat)
+    val numSrc = smallPmidMap.size
+    val bSmallPmidMap = sc.broadcast(smallPmidMap)
+    val lCoo = lMat2Coo(mat)
+
+    val numTerms = mat.select("term_id").distinct.as[Int].collect.size
+    val rCoo = rMat2Coo(smallMat, bSmallPmidMap.value, numTerms, spark)
+    val blkMat = rCoo.toBlockMatrix.cache
+    blkMat.validate
+    val localMat = blkMat.toLocalMatrix()
+    val result = lCoo.toIndexedRowMatrix.multiply(localMat)
+
+    // inverse pmid map
+    val imap = smallPmidMap.map(_.swap)
+
+    val numCandidates = 101
+
+  }
+
+  def multiplyResultNoIndex(mat:Dataset[TermDocWeight], smallMat:Dataset[TermDocWeight], bSmallPmidMap:Broadcast[Map[Int, Int]]): RowMatrix = {
+
+    val sc = spark.sparkContext
+    val lCoo = lMat2Coo(mat)
+
+    val numTerms = mat.select("term_id").distinct.as[Int].collect.max + 1
+    val rCoo = rMat2Coo(smallMat, bSmallPmidMap.value, numTerms, spark)
+    val blkMat = rCoo.toBlockMatrix.cache
+    blkMat.validate
+    val localMat = blkMat.toLocalMatrix()
+    val result = lCoo.toRowMatrix.multiply(localMat)
+
+    result
+  }
+
+  def multiplyResult(mat:Dataset[TermDocWeight], smallMat:Dataset[TermDocWeight], bSmallPmidMap:Broadcast[Map[Int, Int]]): IndexedRowMatrix = {
+
+    val sc = spark.sparkContext
+    val lCoo = lMat2Coo(mat)
+
+    val numTerms = mat.select("term_id").distinct.as[Int].collect.max + 1
+    val rCoo = rMat2Coo(smallMat, bSmallPmidMap.value, numTerms, spark)
+    val blkMat = rCoo.toBlockMatrix.cache
+    blkMat.validate
+    val localMat = blkMat.toLocalMatrix()
+    val result = lCoo.toIndexedRowMatrix.multiply(localMat)
+
+    result
+  }
+
+  def sortScores(): Unit = {
+
+    val sc = spark.sparkContext
+    val hdfsRoot = "hdfs://hpc2:9000"
+    val pmidRangePath = hdfsRoot + "/raw/pmid_range_may10.txt"
+    val pmidRangeDf = spark.read.textFile(pmidRangePath).map(_.toInt).toDF("pmid").limit(10)
+
+    val mat = spark.read.load("hdfs://hpc2:9000/data/bigMatDf").as[TermDocWeight]
+    val smallMat = pmidRangeDf.join(mat.as("b"), "pmid").select("term_id", "pmid", "weight").as[TermDocWeight]
+    mat.cache
+    smallMat.cache
+
+    val smallPmidMap = indexSmallMat(smallMat)
+    val numSrc = smallPmidMap.size
+    val bSmallPmidMap = sc.broadcast(smallPmidMap)
+
+    val result = multiplyResult(mat, smallMat, bSmallPmidMap)
+    // inverse pmid map
+    val imap = smallPmidMap.map(_.swap)
+    val bImap = sc.broadcast(imap)
+
+    val numCandidates = 101
+
+    // rows: index, vector
+    //val testList = testResult.map(indexed_row => {
+    val resultList1 = result.rows.map(indexed_row => {
+      val rel_pmid = indexed_row.index.toInt
+      val scores = indexed_row.vector.toArray
+      (rel_pmid, scores)
+      val (scoreList, minList) = (
+        List.fill(numSrc)(mutable.Map.empty[Int, Double]) // list of result
+       ,List.fill(numSrc)((0, 0.0)))
+      for (i <- 0 to scoreList.size - 1){
+        var sm = scoreList(i)
+        sm += (rel_pmid -> scores(i))
+      }
+      (scoreList, minList)
+    })
+    val resultList = resultList1.reduce({case ((sl1, ml1), (sl2, ml2)) => {
+      val resultSl = ListBuffer.empty[mutable.Map[Int, Double]]
+      val resultMl = ListBuffer.empty[(Int, Double)]
+        for (i <- 0 to (numSrc - 1)) {
+          val sm1 = sl1(i)
+          val sm2 = sl2(i)
+          val mt1 = ml1(i)
+          val mt2 = ml2(i)
+          val resultSm = mergeScoreMap(sm1, sm2, numCandidates)
+          var resultMt = (0, 0.0)
+          if (resultSm.size >0){
+            resultMt = resultSm.toSeq.sortBy(_._2).apply(0) // minimum
+          }
+          resultSl.append(resultSm)
+          resultMl.append(resultMt)
+        }
+      (resultSl.toList, resultMl.toList)
+    }})
+
+    println("=======")
+    println(resultList._1.size)
+    println("=======")
+
+
+    //result.rows.toDF.write.save(hdfsRoot + "/result/limited10_may18")
+    /*
+    val formattedResult = ListBuffer.empty[(Int, Int, Double)]
+    for (i <- 0 to resultList._1.size - 1) {
+      val srcPmid = bImap.value(i).toInt
+      val curMap  = resultList._1(i)
+      curMap.foreach{ case (relPmid, weight) => {
+        formattedResult.append((srcPmid, relPmid, weight))
+      }}
+    }
+    */
+    //sc.parallelize(formattedResult.toList).toDF.show
+//write.save(hdfsRoot + "/result/small_may19")
+    spark.close
+  }
+
+  def denseMultiply(): Unit = {
+
+    val sc = spark.sparkContext
+    val hdfsRoot = "hdfs://hpc2:9000"
+    val pmidRangePath = hdfsRoot + "/raw/pmid_range_may10.txt"
+    val pmidRangeDf = spark.read.textFile(pmidRangePath).map(_.toInt).toDF("pmid").limit(1000)
+
+    val mat = spark.read.load("hdfs://hpc2:9000/data/bigMatDf").as[TermDocWeight]
+    val smallMat = pmidRangeDf.join(mat.as("b"), "pmid").select("term_id", "pmid", "weight").as[TermDocWeight]
+    mat.cache
+    smallMat.cache
+
+    val smallPmidMap = indexSmallMat(smallMat)
+    val numSrc = smallPmidMap.size
+    val bSmallPmidMap = sc.broadcast(smallPmidMap)
+    val lCoo = lMat2Coo(mat)
+
+    val numTerms = mat.select("term_id").distinct.as[Int].collect.size
+    val rCoo = rMat2Coo(smallMat, bSmallPmidMap.value, numTerms, spark)
+    val blkMat = rCoo.toBlockMatrix.cache
+    blkMat.validate
+    val localMat = blkMat.toLocalMatrix()
+    val result = lCoo.toIndexedRowMatrix.multiply(localMat)
+
+    // inverse pmid map
+    val imap = smallPmidMap.map(_.swap)
+
+    val numCandidates = 101
+
+    // rows: index, vector
+    //val testList = testResult.map(indexed_row => {
+    val resultList = result.rows.map(indexed_row => {
+      val rel_pmid = indexed_row.index.toInt
+      val scores = indexed_row.vector.toArray
+      (rel_pmid, scores)
+    }).aggregate(
+      (List.fill(numSrc)(mutable.Map.empty[Int, Double]) // list of result
+      ,List.fill(numSrc)((0, 0.0))) // list of min value (id, score)
+    )(
+    {case ((scoreList, minList), (rel_pmid, scores)) => {
+      fixLengthScoreCompare(scoreList, minList, rel_pmid, scores, numSrc, numCandidates)
+    }},
+    {case ((sl1, ml1), (sl2, ml2)) => {
+      val resultSl = ListBuffer.empty[mutable.Map[Int, Double]]
+      val resultMl = ListBuffer.empty[(Int, Double)]
+        for (i <- 0 to (numSrc - 1)) {
+          val sm1 = sl1(i)
+          val sm2 = sl2(i)
+          val mt1 = ml1(i)
+          val mt2 = ml2(i)
+          val resultSm = mergeScoreMap(sm1, sm2, numCandidates)
+          var resultMt = (0, 0.0)
+          if (resultSm.size >0){
+            resultMt = resultSm.toSeq.sortBy(_._2).apply(0) // minimum
+          }
+          resultSl.append(resultSm)
+          resultMl.append(resultMt)
+        }
+      (resultSl.toList, resultMl.toList)
+    }})
+
+    /*
+    for (i <- 0 to testList._1.size - 1) {
+      val relPmid = imap(i)
+      println(testList._1(i)(relPmid))
+    }
+    */
+
+    //result.rows.toDF.write.save(hdfsRoot + "/result/limited10_may18")
+    val formattedResult = ListBuffer.empty[(Int, Int, Double)]
+    for (i <- 0 to resultList._1.size - 1) {
+      val srcPmid = imap(i).toInt
+      val curMap  = resultList._1(i)
+      curMap.foreach{ case (relPmid, weight) => {
+        formattedResult.append((srcPmid, relPmid, weight))
+      }}
+    }
+    sc.parallelize(formattedResult.toList).toDF.write.save(hdfsRoot + "/result/small_may19")
+  }
+
+  def mergeScoreMap(
+    sm1:mutable.Map[Int, Double]
+  , sm2:mutable.Map[Int, Double]
+  , numCandidates:Int
+  ):mutable.Map[Int, Double] = {
+
+    val resultScoreMap = mutable.Map.empty[Int, Double]
+
+    val seq1 = sm1.toSeq.sortBy(-_._2)
+    val seq2 = sm2.toSeq.sortBy(-_._2)
+    val l1 = seq1.size
+    val l2 = seq2.size
+
+    var i1 = 0
+    var i2 = 0
+
+    // map not full, and maps has value
+    for (dummyIdx <- 0 to numCandidates - 1
+         if (i1 < l1 || i2 < l2)) {
+
+      if (i1 >= l1 || i2 >= l2) {
+        // if i1 exceed, use seq2
+        if (i1 >= l1){
+          // use seq2 k, v
+          resultScoreMap += seq2(i2)
+          i2 = i2 + 1
+
+          // if i2 exceed, use seq1
+        } else{
+          // use seq1 k, v
+          resultScoreMap += seq1(i1)
+          i1 = i1 + 1
+        }
+      } else {
+        // if value1 larger
+        if (seq1(i1)._2 > seq2(i2)._2) {
+          // use seq1 k, v
+          resultScoreMap += seq1(i1)
+          i1 = i1 + 1
+
+          // value1 no larger
+        } else {
+          // use seq2 k, v
+          resultScoreMap += seq2(i2)
+          i2 = i2 + 1
+        }
+      } 
+    }
+    return resultScoreMap
+  }
+
+  def fixLengthScoreCompare(
+    scoreList:List[mutable.Map[Int, Double]]
+  , minList:List[(Int, Double)]
+  , rel_pmid:Int
+  , scores:Array[Double]
+  , numSrc:Int
+  , numCandidates:Int
+  ): (List[mutable.Map[Int, Double]], List[(Int, Double)]) = {
+    // init
+    val resultMinList = ListBuffer.empty[(Int, Double)]
+    // loop in score vector for each src_pmid
+    for(i <- 0 to (numSrc - 1)) {
+      val curScoreMap = scoreList(i)
+      var curMinId = minList(i)._1
+      var curMinScore = minList(i)._2
+      val curScore = scores(i)
+
+      // if map is full
+      if (curScoreMap.size > numCandidates - 1) {
+
+        // if smaller than min, ignore
+        // if larger than min, replace in Map, and replace min
+        if(curScore > curMinScore) {
+          curScoreMap.remove(curMinId)
+          curScoreMap += (rel_pmid -> curScore)
+
+          curMinId = rel_pmid
+          curMinScore = curScore
+        }
+
+        // if smaller than the min, and map is free
+      } else if(curScore < curMinScore) {
+        // replace min and append
+        curMinId = rel_pmid
+        curMinScore = curScore
+
+        curScoreMap += (rel_pmid -> curScore)
+
+        // if not the min, and map is free
+      } else {
+        // just append
+        curScoreMap += (rel_pmid -> curScore)
+      }
+      // update min in list
+      resultMinList.append((curMinId, curMinScore))
+    }
+    (scoreList, resultMinList.toList)
+  }
+
+  def indexSmallMat(sm:Dataset[TermDocWeight]): Map[Int, Int] = {
+    val pmidArr = sm.select("pmid").as[Int].distinct.collect
+    return pmidArr.zipWithIndex.toMap
+  }
+
+  def lMat2RowMatrix(mat:Dataset[TermDocWeight]):CoordinateMatrix = {
+    val lMatEntries = mat.map(attrs => {
+      MatrixEntry(attrs.pmid, attrs.term_id, attrs.weight)
+    }).rdd
+    val lMat = new CoordinateMatrix(lMatEntries)
+    return lMat
+  }
+
+  def lMat2Coo(mat:Dataset[TermDocWeight]):CoordinateMatrix = {
+    val lMatEntries = mat.map(attrs => {
+      MatrixEntry(attrs.pmid, attrs.term_id, attrs.weight)
+    }).rdd
+    val lMat = new CoordinateMatrix(lMatEntries)
+    return lMat
+  }
+
+  def rMat2Coo(
+    mat:Dataset[TermDocWeight], 
+    pmidMap:Map[Int, Int], 
+    numTerms:Int, 
+    spark:SparkSession):CoordinateMatrix = {
+    val sc = spark.sparkContext
+    val lMatEntries = mat.map(attrs => {
+        val termId = attrs.term_id
+        val pmid = attrs.pmid
+        val weight = attrs.weight
+        MatrixEntry(termId, pmidMap(pmid), weight)
+      }).rdd
+    val lMat = new CoordinateMatrix(lMatEntries, numTerms, pmidMap.size)
+    return lMat
+  }
+
+
+  def scoreDf(): Unit = {
+    val spark = SparkSession
+      .builder
+      .appName("Mat Multiply")
+      .getOrCreate()
+    val sc = spark.sparkContext
+
+    import spark.implicits._
+
+    val hdfsRoot = "hdfs://hpc2:9000"
+
+    // out path
+    val scoreOutPath = hdfsRoot + "/data/scoreDf"
+
+    // check exists
+    val hdfs = new utils.HdfsFiles(spark, hdfsRoot)
+    for(p <- List(
+         scoreOutPath
+        )) {
+      if(hdfs.exists(p)) {
+        throw new HdfsAlreadyExistsException(p)
+      }
+    }
+
+
+    // load big mat
+    val bigMatPath = hdfsRoot + "/data/bigMatDf"
+    val mat = spark.read.load(bigMatPath).as[TermDocWeight]
+    mat.cache
+
+    // load small mat
+    //val pmidRangePath = hdfsRoot + "/raw/pmid_range_10.txt"
+    val pmidRangePath = hdfsRoot + "/raw/pmid_range_may10.txt"
+    //val pmidRangeDf = sc.parallelize(pmidRangePath).toDF("pmid")
+    val pmidRangeDf = spark.read.textFile(pmidRangePath).map(_.toInt).toDF("pmid")
+    val smallMat = pmidRangeDf.join(mat.as("b"), "pmid").select("term_id", "pmid", "weight").as[TermDocWeight]
+    smallMat.cache()
+    val localMat = smallMat.as[(Int, Int, Double)].collect.toSeq
+    val ml = new algorithms.matrix.Multiply(spark)
+    val scoreMat = ml.coordinateMatrixMultiply3(mat, smallMat)
+
+    // write data
+    scoreMat.write.save(scoreOutPath)
+    spark.close
+  }
+
+  def bigMatWithTopTerms(): Unit = {
+    val spark = SparkSession
+      .builder
+      .appName("Bag Of Words")
+      .getOrCreate()
+
+    val sc = spark.sparkContext
+
+    val hdfsRoot = "hdfs://hpc2:9000"
+    val absPath = hdfsRoot + "/raw/abs_data3.txt"
+    //val absPath = hdfsRoot + "/raw/small_abs_data.txt"
+
+    val matOutPath = hdfsRoot + "/data/bigMatDf2" 
+    //val matOutPath = hdfsRoot + "/data/smallMatDf"
+    val idfsOutPath = hdfsRoot + "/data/idfsDf2"
+    val termIdsOutPath = hdfsRoot + "/data/termIdsDf2"
+
+    // check exists
+    val hdfs = new utils.HdfsFiles(spark, hdfsRoot)
+    for(p <- List(
+        matOutPath
+        , idfsOutPath
+        , termIdsOutPath
+        )) {
+      if(hdfs.exists(p)) {
+        throw new HdfsAlreadyExistsException(p)
+      }
+    }
+
+    val mat = bagOfWordsProcessWithTopTerms(spark, absPath, idfsOutPath, termIdsOutPath)
+    mat.write.save(matOutPath)
+
+    //val df = new sparkutil.Dataframe()
+    //df.genPostingList()
+    spark.close
+  }
+
+  def bigMat(): Unit = {
+    val spark = SparkSession
+      .builder
+      .appName("Bag Of Words")
+      .getOrCreate()
+
+    val sc = spark.sparkContext
+
+    val hdfsRoot = "hdfs://hpc2:9000"
+    val absPath = hdfsRoot + "/raw/abs_data3.txt"
+    //val absPath = hdfsRoot + "/raw/small_abs_data.txt"
+
+    val matOutPath = hdfsRoot + "/data/bigMatDf" 
+    //val matOutPath = hdfsRoot + "/data/smallMatDf"
+    val idfsOutPath = hdfsRoot + "/data/idfsDf"
+    val termIdsOutPath = hdfsRoot + "/data/termIdsDf"
+
+    // check exists
+    val hdfs = new utils.HdfsFiles(spark, hdfsRoot)
+    for(p <- List(
+        matOutPath
+        , idfsOutPath
+        , termIdsOutPath
+        )) {
+      if(hdfs.exists(p)) {
+        throw new HdfsAlreadyExistsException(p)
+      }
+    }
+
+    val mat = bagOfWordsProcess(spark, absPath, idfsOutPath, termIdsOutPath)
+    mat.write.save(matOutPath)
+
+    //val df = new sparkutil.Dataframe()
+    //df.genPostingList()
+    spark.close
+  }
+
+  def bagOfWordsProcessWithTopTerms(spark:SparkSession, absPath:String, idfsOutPath:String, termIdsOutPath:String): DataFrame = {
+    val sc = spark.sparkContext
+    val topSize = 50000
+
+    val bow = new algorithms.BagOfWords(spark)
+    val textRdd = bow.load(absPath)
+    val normedDf = bow.preprocess(textRdd)
+    val termsDf = bow.getAndCacheDocFreqs(normedDf)
+    val tms = new algorithms.Terms(spark, termsDf)
+    val tfByPmid = tms.tfByDoc()
+    val idfs = bow.getTopIdfs(termsDf, tfByPmid, tms, topSize)
+    val termIds = bow.getTermIds(idfs)
+
+    // write idfs and termId to hdfs
+    val dw = new utils.DataWriter(spark)
+    dw.write(idfs, idfsOutPath)
+    dw.write(termIds, termIdsOutPath)
+
+    // broadcast
+    val bIdfs = sc.broadcast(idfs)
+    val bTermIds = sc.broadcast(termIds)
+
+    // big mat
+    val wt = new algorithms.Weights(spark)
+    val mat = wt.scoreMatByDocs(tfByPmid, bIdfs.value, bTermIds.value)
+    mat
+  }
+
+  def bagOfWordsProcess(spark:SparkSession, absPath:String, idfsOutPath:String, termIdsOutPath:String): DataFrame = {
+    val sc = spark.sparkContext
+    val freqThreshold = 10
+
+    val bow = new algorithms.BagOfWords(spark)
+    val textRdd = bow.load(absPath)
+    val normedDf = bow.preprocess(textRdd)
+    val termsDf = bow.getAndCacheDocFreqs(normedDf)
+    val tms = new algorithms.Terms(spark, termsDf)
+    val tfByPmid = tms.tfByDoc()
+    val idfs = bow.getIdfs(termsDf, tfByPmid, tms, freqThreshold)
+    val termIds = bow.getTermIds(idfs)
+
+    // write idfs and termId to hdfs
+    val dw = new utils.DataWriter(spark)
+    dw.write(idfs, idfsOutPath)
+    dw.write(termIds, termIdsOutPath)
+
+    // broadcast
+    val bIdfs = sc.broadcast(idfs)
+    val bTermIds = sc.broadcast(termIds)
+
+    // big mat
+    val wt = new algorithms.Weights(spark)
+    val mat = wt.scoreMatByDocs(tfByPmid, bIdfs.value, bTermIds.value)
+    mat
   }
 
   def downloadAllFromMysql():Unit = {

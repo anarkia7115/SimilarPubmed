@@ -7,7 +7,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.collection.JavaConversions._
 import org.apache.spark.rdd.RDD
 
-class Lemmatizer {
+class Lemmatizer extends java.io.Serializable {
 
   def createNLPPipeline(): StanfordCoreNLP = {
     val props = new Properties()
@@ -35,9 +35,9 @@ class Lemmatizer {
    * Input:  RDD[pmid, title, abs_text]
    * Output: RDD[pmid, Seq[String], Seq[String]]
    * */
-  def lemmatize(textRdd: RDD):RDD = {
+  def lemmatize(textRdd: RDD[(Int, String, String)]):RDD[(Int, Seq[String], Seq[String])] = {
 
-    val lemmatized = absRdd.mapPartitions{ it =>
+    val lemmatized = textRdd.mapPartitions{ it =>
       val ppl = createNLPPipeline()
       it.map { case (pmid, title, abs_text) =>
 	(   pmid

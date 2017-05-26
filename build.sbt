@@ -7,27 +7,26 @@ scalaVersion := "2.11.8"
 //scalacOptions := Seq("-optimise", "-Yinline-warnings")
 
 libraryDependencies ++= Seq(
-//  "org.slf4j" % "slf4j-api" % "1.7.5" ,
-//  "org.slf4j" % "slf4j-simple" % "1.7.5",
-//  "com.h2database" % "h2" % "1.3.170",
-  "com.typesafe.slick" %% "slick" % "3.1.1"
-//  "javax.servlet" % "javax.servlet-api" % "3.1.0", 
-  , "org.apache.spark" % "spark-core_2.11" % "2.1.0"
-  , "org.apache.spark" % "spark-sql_2.11" % "2.1.0"
-  , "org.apache.spark" % "spark-streaming_2.11" % "2.1.0"
-
-  //, "de.tudarmstadt.ukp.dkpro.core" % "de.tudarmstadt.ukp.dkpro.core.opennlp-asl" % "1.6.2"
-  //, "de.tudarmstadt.ukp.dkpro.core" % "de.tudarmstadt.ukp.dkpro.core.languagetool-asl" % "1.6.2"
-  //, "de.tudarmstadt.ukp.dkpro.core" % "de.tudarmstadt.ukp.dkpro.core.maltparser-asl" % "1.6.2"
-  //, "de.tudarmstadt.ukp.dkpro.core" % "de.tudarmstadt.ukp.dkpro.core.io.text-asl" % "1.6.2"
-  //, "de.tudarmstadt.ukp.dkpro.core" % "de.tudarmstadt.ukp.dkpro.core.io.conll-asl" % "1.6.2"
+  /*"com.typesafe.slick" %% "slick" % "3.1.1"*/
+  "org.apache.spark" % "spark-core_2.11" % "2.1.0" % "provided"
+  , "org.apache.spark" % "spark-sql_2.11" % "2.1.0" % "provided" 
+  , "org.apache.spark" % "spark-streaming_2.11" % "2.1.0" % "provided" 
+  /*
+  , "org.apache.lucene" % "lucene-core" % "4.6.0"
+  , "org.apache.lucene" % "lucene-queries" % "4.6.0"
+  , "org.apache.lucene" % "lucene-analyzers-common" % "4.6.0"
+  , "org.apache.lucene" % "lucene-queryparser" % "4.6.0"
+  , "org.apache.solr" % "solr-solrj" % "4.6.0"
+  */
 )
-//  ,"org.scala-lang.modules" % "scala-xml_2.11" % "1.0.5")
-//  "org.clapper" %% "grizzled-slf4j" % "1.0.1")  // For Scala 2.10 or later
 
-libraryDependencies += "mysql" % "mysql-connector-java" % "5.1.16"
+//libraryDependencies += "mysql" % "mysql-connector-java" % "5.1.16"
 libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0"
 libraryDependencies += "org.scalatest" %% "scalatest" % "2.2.4" % "test"
+libraryDependencies += "org.apache.spark" % "spark-mllib_2.11" % "2.1.0" % "provided" 
+libraryDependencies += "edu.stanford.nlp" % "stanford-corenlp" % "3.3.0"
+libraryDependencies += "edu.stanford.nlp" % "stanford-corenlp" % "3.3.0" classifier "models"
+
 
 // https://mvnrepository.com/artifact/org.apache.spark/spark-core_2.10
 //libraryDependencies += "org.apache.spark" % "spark-core_2.10" % "2.1.0"
@@ -35,10 +34,12 @@ libraryDependencies += "org.scalatest" %% "scalatest" % "2.2.4" % "test"
 //XitrumPackage.copy("dirToCopy", "fileToCopy")
 
 // exclude
-excludeFilter in unmanagedSources := "PubmedXmlParser.scala" || "PmidLength.scala" || "SparkTest.scala"
+excludeFilter in unmanagedSources := "PubmedXmlParser.scala" || "PmidLength.scala" || "SparkTest.scala" || "PorterStemmer.scala" || "UmlsTagger.scala" || "spark-shell.scala" || "FileReader.scala" || "Tables.scala"
 
 mainClass := Some("topic.Main")
 
 val buildSettings = Defaults.defaultSettings ++ Seq(
    javaOptions += "-Xmx6G"
 )
+
+//assemblyJarName in assembly := "something.jar"
