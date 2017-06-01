@@ -4,6 +4,10 @@ class XmlTagRemover(tagToRemove:String) extends java.io.Serializable {
   // <AbstractText Label="null" NlmCategory="UNLABELLED">
   // </AbstractText>
   def trim(xmlText: String): String = {
+    xmlText.replaceAll("<AbstractText Label=.*?>", "").replaceAll("</AbstractText>", "")
+  }
+  /*
+  def trim(xmlText: String): String = {
     // front trim
     val headWordIdx = xmlText.indexOfSlice(tagToRemove)
     val headIdx = xmlText.indexOf(">", headWordIdx) + 1
@@ -12,4 +16,5 @@ class XmlTagRemover(tagToRemove:String) extends java.io.Serializable {
     return xmlText.slice(headIdx, tailIdx)
     // back trim
   }
+  */
 }
