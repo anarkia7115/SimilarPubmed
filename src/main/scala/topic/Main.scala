@@ -16,6 +16,8 @@ import scala.collection.mutable.ListBuffer
 import org.apache.spark.mllib.linalg.{Vector, Vectors}
 import org.apache.spark.mllib.linalg.{Matrix, Matrices}
 import org.apache.spark.mllib.linalg.distributed.{BlockMatrix, CoordinateMatrix, MatrixEntry, IndexedRowMatrix, RowMatrix}
+import org.apache.spark.mllib.linalg.SingularValueDecomposition
+
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.DataFrame
@@ -50,9 +52,34 @@ object Main extends LazyLogging {
   import spark.implicits._
 
   def main(args: Array[String]): Unit = {
-    bigMatWithTopTerms()
+    val absPath =  "/raw/abs_data3.txt"
+
+    val matOutPath =  "/data/bigMatDf3" 
+    val idfsOutPath = "/data/idfsDf3"
+    val termIdsOutPath = "/data/termIdsDf3"
+
+    //val mat = bigMat(absPath, matOutPath, idfsOutPath, termIdsOutPath)
+    val mat = spark.read.load(matOutPath)
+
+    val twByPmid = mat.as[TermDocWeight].map(attrs => 
+      (attrs.pmid, Map(attrs.term_id -> attrs.weight))
+    ).rdd.reduceByKey(_ ++ _).toDF("pmid", "tw")
+
+    chunkAnalyzeProcess(args, twByPmid)
   }
-  def chunkAnalyzeProcess(args: Array[String]): Unit = {
+
+  def calcSvd(args: Array[String]): Unit = {
+    val matPath = "/data/bigMatDf2"
+    val mat = spark.read.load(matPath).sample(false, 0.00001)
+    mat.cache
+    val svdAl = new algorithms.Svd(spark)
+    val termDocMat = svdAl.genRowMatrix(mat)
+    termDocMat.rows.cache
+    val k = 1000
+    val svd = termDocMat.computeSVD(k, computeU=true)
+  }
+
+  def chunkAnalyzeProcess(args: Array[String], twByPmid:DataFrame): Unit = {
     val sc = spark.sparkContext
 
     val hdfsRoot = "hdfs://hpc2:9000"
@@ -67,11 +94,9 @@ object Main extends LazyLogging {
       toDF("pmid").limit(srcLimit)
 
     val pmidRange = pmidRangeDf.as[Int].collect
-
-    val twByPmid = spark.read.load(hdfsRoot + "/data/twByPmidDf")
-    twByPmid.cache
-
     val pmidChunks = pmidRange.grouped(chunkSize).toList
+
+    twByPmid.cache
 
     var i = 0
     pmidChunks.foreach(chunk => {
@@ -161,7 +186,7 @@ object Main extends LazyLogging {
     */
 
     /*
-    val twByPmid = mat.map(attrs => 
+    val twByPmid = mat.as[TermDocWeight].map(attrs => 
       (attrs.pmid, Map(attrs.term_id, attrs.weight))
     ).rdd.reduceByKey(_ ++ _)
 
@@ -677,6 +702,21 @@ object Main extends LazyLogging {
     return lMat
   }
 
+  /*(termId, docId, weight)*/
+  def lRdd2Vecs(mat:RDD[(Int, Long, Double)]):RDD[MatrixEntry] = {
+    val lMatEntries = mat.map(attrs => {
+      MatrixEntry(attrs._1, attrs._2, attrs._3)
+    })
+    return lMatEntries
+  }
+
+  def lMat2Vecs(mat:Dataset[TermDocWeight], docIds:Map[Int, Int]):RDD[MatrixEntry] = {
+    val lMatEntries = mat.map(attrs => {
+      MatrixEntry(docIds(attrs.pmid), attrs.term_id, attrs.weight)
+    }).rdd
+    return lMatEntries
+  }
+
   def lMat2Coo(mat:Dataset[TermDocWeight]):CoordinateMatrix = {
     val lMatEntries = mat.map(attrs => {
       MatrixEntry(attrs.pmid, attrs.term_id, attrs.weight)
@@ -748,7 +788,7 @@ object Main extends LazyLogging {
     spark.close
   }
 
-  def bigMatWithTopTerms(): Unit = {
+  def bigMatWithTopTerms(absPath:String, matOutPath:String, idfsOutPath:String, termIdsOutPath:String): Unit = {
     val spark = SparkSession
       .builder
       .appName("Bag Of Words")
@@ -756,16 +796,16 @@ object Main extends LazyLogging {
 
     val sc = spark.sparkContext
 
-    val hdfsRoot = "hdfs://hpc2:9000"
-    val absPath = hdfsRoot + "/raw/abs_data3.txt"
-    //val absPath = hdfsRoot + "/raw/small_abs_data.txt"
+    //val absPath =  "/raw/abs_data3.txt"
+    //val absPath = "/raw/small_abs_data.txt"
 
-    val matOutPath = hdfsRoot + "/data/bigMatDf2" 
-    //val matOutPath = hdfsRoot + "/data/smallMatDf"
-    val idfsOutPath = hdfsRoot + "/data/idfsDf2"
-    val termIdsOutPath = hdfsRoot + "/data/termIdsDf2"
+    //val matOutPath =  "/data/bigMatDf2" 
+    //val matOutPath = "/data/smallMatDf"
+    //val idfsOutPath = "/data/idfsDf2"
+    //val termIdsOutPath = "/data/termIdsDf2"
 
     // check exists
+    val hdfsRoot = "hdfs://hpc2:9000"
     val hdfs = new utils.HdfsFiles(spark, hdfsRoot)
     for(p <- List(
         matOutPath
@@ -785,24 +825,14 @@ object Main extends LazyLogging {
     spark.close
   }
 
-  def bigMat(): Unit = {
-    val spark = SparkSession
-      .builder
-      .appName("Bag Of Words")
-      .getOrCreate()
-
-    val sc = spark.sparkContext
-
-    val hdfsRoot = "hdfs://hpc2:9000"
-    val absPath = hdfsRoot + "/raw/abs_data3.txt"
-    //val absPath = hdfsRoot + "/raw/small_abs_data.txt"
-
-    val matOutPath = hdfsRoot + "/data/bigMatDf" 
-    //val matOutPath = hdfsRoot + "/data/smallMatDf"
-    val idfsOutPath = hdfsRoot + "/data/idfsDf"
-    val termIdsOutPath = hdfsRoot + "/data/termIdsDf"
+  def bigMat(
+    absPath:String, 
+    matOutPath:String, 
+    idfsOutPath:String, 
+    termIdsOutPath:String): DataFrame = {
 
     // check exists
+    val hdfsRoot = "hdfs://hpc2:9000"
     val hdfs = new utils.HdfsFiles(spark, hdfsRoot)
     for(p <- List(
         matOutPath
@@ -817,9 +847,7 @@ object Main extends LazyLogging {
     val mat = bagOfWordsProcess(spark, absPath, idfsOutPath, termIdsOutPath)
     mat.write.save(matOutPath)
 
-    //val df = new sparkutil.Dataframe()
-    //df.genPostingList()
-    spark.close
+    return mat
   }
 
   def bagOfWordsProcessWithTopTerms(spark:SparkSession, absPath:String, idfsOutPath:String, termIdsOutPath:String): DataFrame = {
