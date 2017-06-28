@@ -1,8 +1,52 @@
 package algorithms
 
 import scala.math
+import scala.collection.SortedSet
+import org.apache.spark.mllib.linalg.distributed.IndexedRow
 
 object SerializableClass extends java.io.Serializable {
+
+
+  def aggSeqOp(
+    topSize:Int
+    , sortedSetOrdering:Ordering[(Long, Double)]
+  )(
+    sortedSetList:List[SortedSet[(Long, Double)]]
+  , ir:IndexedRow
+  ):List[SortedSet[(Long, Double)]] = {
+    val rel_pmid = ir.index
+    val src_scoreVec = ir.vector
+    sortedSetList.zip(src_scoreVec.toArray).map{ 
+      case (sortedSet, src_score) => {
+      var newSortedSet = SortedSet[(Long, Double)]()(sortedSetOrdering)
+      if (sortedSet.size < topSize) {
+        // if not full, just add
+        newSortedSet = sortedSet + ((rel_pmid, src_score))
+      } else {
+        val (min_rel_pmid, min_score) = sortedSet.take(1).toList(0)
+        if (src_score > min_score) {
+          // drop and add
+          newSortedSet = sortedSet.drop(1) + ((rel_pmid, src_score))
+        } else{
+          // not change
+          newSortedSet = sortedSet
+        }
+      }
+      newSortedSet
+    }}
+  }
+
+  def aggCombOp(topSize:Int)(
+    ssl1:List[SortedSet[(Long, Double)]]
+  , ssl2:List[SortedSet[(Long, Double)]]
+  ):List[SortedSet[(Long, Double)]] = {
+
+    ssl1.zip(ssl2).map{ case (ss1, ss2) => {
+      val mergedSs = ss1 ++ ss2
+      val topSs = mergedSs.takeRight(topSize)
+      topSs
+    }}
+  }
 
     def countSubstring(str1:String, str2:String):Int={
       def count(pos:Int, c:Int):Int={

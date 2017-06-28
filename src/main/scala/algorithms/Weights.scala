@@ -75,3 +75,32 @@ class Weights(spark:SparkSession) extends java.io.Serializable {
     //.toDF("term_id", "pmid", "score")
   }
 }
+
+/*
+val numTerms = 10
+
+val arr = v.toArray
+for (i <- 0 until numConcepts) {
+  println(i)
+  val offs = i * v.numRows
+  val termWeights = arr.slice(offs, offs + v.numRows).zipWithIndex
+  val sorted = termWeights.sortBy(-_._1)
+  topTerms += sorted.take(numTerms).map{
+    case (score, id) => (tids(id), score)
+  }
+}
+
+def topDocsInTopConcepts(
+    svd: SingularValueDecomposition[RowMatrix, Matrix], 
+    numConcepts: Int, numDocs: Int, docIds: Map[Long, String])
+  : Seq[Seq[(String, Double)]] = {
+  val u = svd.U
+  val topDocs = new ArrayBuffer[Seq[(String, Double)]]()
+  for (i <- 0 until numConcepts) {
+    val docWeights = u.rows.map(_.toArray(i)).zipWithUniqueId()
+    topDocs += docWeights.top(numDocs).map{
+      case (score, id) => (docIds(id), score)
+    }
+  }
+}
+*/

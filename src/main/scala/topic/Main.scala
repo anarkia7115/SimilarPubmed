@@ -7,18 +7,24 @@ package topic
 //import grizzled.slf4j.{Logger, Logging}
 
 import java.io._
+import com.redis._
 
 import com.typesafe.scalalogging.LazyLogging
 
 import scala.collection._
 import scala.collection.mutable.ListBuffer
 
+import org.apache.log4j.Level
+import org.apache.log4j.LogManager
+import org.apache.spark.mllib.linalg.SingularValueDecomposition
 import org.apache.spark.mllib.linalg.{Vector, Vectors}
 import org.apache.spark.mllib.linalg.{Matrix, Matrices}
 import org.apache.spark.mllib.linalg.distributed.{BlockMatrix, CoordinateMatrix, MatrixEntry, IndexedRowMatrix, RowMatrix}
+import org.apache.spark.mllib.linalg.distributed.IndexedRow
 import org.apache.spark.mllib.linalg.SingularValueDecomposition
 
 import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.sql.functions._
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.SparkSession
@@ -47,39 +53,231 @@ object Main extends LazyLogging {
   val spark = SparkSession
     .builder
     .appName("Matrix Multiply")
-    .config("spark.master", "spark://hpc2:7077")
+    .config("spark.master", "spark://soldier1:7077")
+    .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
     .getOrCreate()
   import spark.implicits._
 
   def main(args: Array[String]): Unit = {
+
+    val sc = spark.sparkContext
+    val usBinPath = args(0)
+    val us:RDD[IndexedRow] = sc.objectFile[IndexedRow](usBinPath)
+    val pmidRangeFile = args(1)
+    //val onePmid = 20378691L
+    val pmidRdd:RDD[Long] = sc.textFile(
+      pmidRangeFile).map(_.toLong)
+      //pmidRangeFile).map(_.toLong).filter(_ == onePmid)
+    val topResultsOut = args(2)
+
+    val svdAl = new algorithms.Svd(spark)
+
+    svdAl.run(us, pmidRdd, topResultsOut)
+
+    spark.close()
+  }
+
+  def onePmidSvd(args: Array[String]): Unit = {
+
+    val sc = spark.sparkContext
+    val usBinPath = args(0)
+    val us:RDD[IndexedRow] = sc.objectFile[IndexedRow](usBinPath)
+    val onePmid = 20378691
+    val topResultsOut = args(1)
+
+    val svdAl = new algorithms.Svd(spark)
+
+    svdAl.calcOnePmidTopResult(us, onePmid, topResultsOut)
+
+    spark.close()
+  }
+
+  def testVecIdx(vecBinPath:String): Long = {
+    val sc = spark.sparkContext
+    val vecs = sc.objectFile[org.apache.spark.mllib.linalg.Vector](vecBinPath)
+    vecs.zipWithUniqueId.map(_._2).max
+  }
+
+  def calcSvd(): SingularValueDecomposition[RowMatrix, Matrix] = {
+
+    val sc = spark.sparkContext
+    val vecs = sc.objectFile[org.apache.spark.mllib.linalg.Vector]("/data/svd/vecs.bin").cache()
+    import org.apache.spark.mllib.linalg.distributed.RowMatrix
+    val cmat = new RowMatrix(vecs)
+
+    val k = 1000
+    val svd = cmat.computeSVD(k, computeU=true)
+    svd
+  }
+
+  def writeToRedis(): Unit = {
+    val mat = spark.read.load("/data/matWithoutDashDf")
+
+    mat.foreachPartition( attrs_iter => {
+      val redisHost = "192.168.2.10"
+      val rr = new RedisClient(redisHost, 6379, 6)
+      //println(attrs_iter.size)
+
+      attrs_iter.foreach(attrs => {
+        val term_id = attrs.getInt(0)
+        val pmid = attrs.getInt(1)
+        val weight = attrs.getDouble(2)
+        rr.zadd("term_id:%s".format(term_id), weight, pmid)
+        //println("term_id:%s".format(term_id))
+      })
+    })
+  }
+
+  def filterInList(df:DataFrame, colName:String, rangeList:List[Int]):DataFrame = {
+    df.where(col(colName).isin(rangeList.map(lit(_)):_*))
+  }
+
+  def resultRangedDetails(args: Array[String]): DataFrame = {
+    val twByPmid = spark.read.load("/data/twByPmidDf3").cache
+    val ppScoresPath = "/data/ppScores"
+    val ppScores = spark.read.load(ppScoresPath).cache
+    val relToSrcPmid = ppScores.select("rel_pmid", "src_pmid").map(attrs => {
+      (attrs.getInt(0), List(attrs.getInt(1)))
+    }).rdd.reduceByKey(_ ++ _).collectAsMap
+
+    val srcTw = ppScores.select("src_pmid").distinct.
+      toDF("pmid").join(twByPmid, "pmid").select("pmid", "tw").
+      as[(Int, Map[Int, Double])].rdd.collectAsMap
+    val relTwDf = ppScores.select("rel_pmid").distinct.
+      toDF("pmid").join(twByPmid, "pmid").select("pmid", "tw")
+
+    val sc = spark.sparkContext
+    val bSrcTw = sc.broadcast(srcTw)
+    val bRelToSrcPmid = sc.broadcast(relToSrcPmid)
+
+    relTwDf.flatMap(attrs => { 
+      val relPmid = attrs.getInt(0)
+      val rtw = attrs.getMap[Int, Double](1)
+      val srcList = bRelToSrcPmid.value(relPmid)
+      srcList.flatMap(srcPmid => {
+        val stw = bSrcTw.value(srcPmid)
+        stw.flatMap{ case (st, sw) => {
+          if (rtw.contains(st)) {
+            val rw = rtw(st)
+            Some((srcPmid, relPmid, st, sw, rw, sw*rw))
+          }
+          else {
+            None
+          }
+        }}
+      })
+    }).toDF("src_pmid", "rel_pmid", "term_id", "src_weight", "rel_weight", "score")
+
+    /*
+    resultRangeMap.flatMap{ case (srcPmid, relPmidList) => {
+      val srcTw = twByPmid.
+        filter($"pmid" === srcPmid).
+        as[(Int, Map[Int, Double])].collect()(0)._2
+      val relTws = filterInList(
+        twByPmid, "pmid", relPmidList).
+        as[(Int, Map[Int, Double])].collect
+      }
+      relTws.flatMap{case (relPmid, tw) => {
+        tw.flatMap{ case (t1, w1) => {
+          if (srcTw.contains(t1)){
+            val w2 = srcTw(t1)
+            Some((srcPmid, relPmid, t1, w1, w2, w1*w2))
+          }
+          else {
+            None
+          }
+        }}
+      }
+    }}
+    */
+
+    //chunkAnalyzeProcess(args, resultRangedTBP, "/data/resultRangedPpScoresChunks/chunk")
+  }
+
+  /*
+   * sp: scored pubmed
+   * */
+  def compare(spPath:String
+      , comparedResultPath:String
+      , nbRank:Int
+      , spRank:Int): Unit = {
+
+    val nbPath = "/data/rankedNbDf"
+
+    val rankedNbDf = spark.read.load(nbPath)
+    val ppRankedScores = spark.read.load(spPath).
+      filter($"src_pmid" =!= $"rel_pmid")
+
+    import org.apache.spark.sql.expressions.Window
+    val w = Window.partitionBy($"src_pmid").orderBy(desc("score"))
+    val ranked = ppRankedScores.withColumn("rank", rank.over(w))
+
+    val nb = rankedNbDf.filter($"rank" <= nbRank)
+    nb.cache
+    val sp = ranked.filter($"rank" <= spRank)
+    sp.cache
+
+    nb.createOrReplaceTempView("nb")
+    sp.createOrReplaceTempView("sp")
+
+
+    val query1 = """
+    select sp.src_pmid, sum(if(nb.rel_pmid is null, 0, 1)) as comm_num
+    from nb right outer join sp
+    on nb.src_pmid = sp.src_pmid
+      and nb.rel_pmid = sp.rel_pmid
+    group by 1
+    order by 2 desc
+    """
+
+    val comparedResult = spark.sql(query1)
+    comparedResult.createOrReplaceTempView("cp")
+
+    val query2 = """
+    select comm_num, count(1) as c
+    from cp
+    group by 1
+    order by 2 desc
+    """
+
+    val commDist = spark.sql(query2)
+    commDist.cache.show()
+    commDist.map(attrs => {
+      "%s\t%s".format(attrs.getLong(0), attrs.getLong(1))
+    }).write.format("text").save(comparedResultPath)
+  }
+
+  def rawAbsToppScoreChunks(args: Array[String]): Unit = {
     val absPath =  "/raw/abs_data3.txt"
 
     val matOutPath =  "/data/bigMatDf3" 
     val idfsOutPath = "/data/idfsDf3"
     val termIdsOutPath = "/data/termIdsDf3"
 
-    //val mat = bigMat(absPath, matOutPath, idfsOutPath, termIdsOutPath)
-    val mat = spark.read.load(matOutPath)
+    val mat = bigMat(absPath, matOutPath, idfsOutPath, termIdsOutPath)
+    //val mat = spark.read.load(matOutPath)
 
     val twByPmid = mat.as[TermDocWeight].map(attrs => 
       (attrs.pmid, Map(attrs.term_id -> attrs.weight))
     ).rdd.reduceByKey(_ ++ _).toDF("pmid", "tw")
 
-    chunkAnalyzeProcess(args, twByPmid)
+    //val twByPmid = spark.read.load("/data/twByPmidDf3")
+
+    chunkAnalyzeProcess(args, twByPmid, "/data/ppScoreChunks/chunk")
   }
 
   def calcSvd(args: Array[String]): Unit = {
     val matPath = "/data/bigMatDf2"
     val mat = spark.read.load(matPath).sample(false, 0.00001)
-    mat.cache
-    val svdAl = new algorithms.Svd(spark)
-    val termDocMat = svdAl.genRowMatrix(mat)
-    termDocMat.rows.cache
-    val k = 1000
-    val svd = termDocMat.computeSVD(k, computeU=true)
+    //mat.cache
+    //val svdAl = new algorithms.Svd(spark)
+    //val termDocMat = svdAl.genRowMatrix(mat)
+    //termDocMat.rows.cache
+    //val k = 1000
+    //val svd = termDocMat.computeSVD(k, computeU=true)
   }
 
-  def chunkAnalyzeProcess(args: Array[String], twByPmid:DataFrame): Unit = {
+  def chunkAnalyzeProcess(args: Array[String], twByPmid:DataFrame, resultPrefix:String): Unit = {
     val sc = spark.sparkContext
 
     val hdfsRoot = "hdfs://hpc2:9000"
@@ -106,12 +304,12 @@ object Main extends LazyLogging {
         numOfPartitions, 
         numCandidates)
       ppScoreChunk.write.save(hdfsRoot + 
-        "/data/ppScoreChunks/chunk_%s".format(i.toString))
+        "%s_%s".format(resultPrefix, i.toString))
       i += 1
     })
   }
 
-  def unionAll(chunksPath:String, hdfsOutPath:String): Dataset[PpScore] = {
+  def unionAll(chunksPath:String): Dataset[PpScore] = {
     val sc = spark.sparkContext
     import org.apache.hadoop.fs.FileSystem
     import org.apache.hadoop.fs.Path

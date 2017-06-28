@@ -11,13 +11,14 @@ libraryDependencies ++= Seq(
   "org.apache.spark" % "spark-core_2.11" % "2.1.0" % "provided"
   , "org.apache.spark" % "spark-sql_2.11" % "2.1.0" % "provided" 
   , "org.apache.spark" % "spark-streaming_2.11" % "2.1.0" % "provided" 
+  , "net.debasishg" %% "redisclient" % "3.4"
   /*
-  , "org.apache.lucene" % "lucene-core" % "4.6.0"
-  , "org.apache.lucene" % "lucene-queries" % "4.6.0"
-  , "org.apache.lucene" % "lucene-analyzers-common" % "4.6.0"
-  , "org.apache.lucene" % "lucene-queryparser" % "4.6.0"
-  , "org.apache.solr" % "solr-solrj" % "4.6.0"
+  , "org.apache.lucene" % "lucene-core" % "6.6.0"
+  , "org.apache.lucene" % "lucene-queries" % "6.6.0"
+  , "org.apache.lucene" % "lucene-analyzers-common" % "6.6.0"
+  , "org.apache.lucene" % "lucene-queryparser" % "6.6.0"
   */
+  //, "org.apache.solr" % "solr-solrj" % "4.6.0"
 )
 
 //libraryDependencies += "mysql" % "mysql-connector-java" % "5.1.16"
@@ -34,7 +35,7 @@ libraryDependencies += "edu.stanford.nlp" % "stanford-corenlp" % "3.3.0" classif
 //XitrumPackage.copy("dirToCopy", "fileToCopy")
 
 // exclude
-excludeFilter in unmanagedSources := "PubmedXmlParser.scala" || "PmidLength.scala" || "SparkTest.scala" || "PorterStemmer.scala" || "UmlsTagger.scala" || "spark-shell.scala" || "FileReader.scala" || "Tables.scala"
+excludeFilter in unmanagedSources := "PubmedXmlParser.scala" || "PmidLength.scala" || "SparkTest.scala" || "PorterStemmer.scala" || "UmlsTagger.scala" || "spark-shell.scala" || "FileReader.scala" || "Tables.scala" || "lucene-shell.scala" 
 
 mainClass := Some("topic.Main")
 
