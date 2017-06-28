@@ -13,11 +13,11 @@
 
 using namespace std;
 std::mutex mtx;
-void thread_func( ofstream& result_file , const map<int, vector<pair<int, float> > > mat , const vector<string> docLines , const int top_k);
-void thread_inner_func( ofstream& result_file , const map<int, vector<pair<int, float> > > mat , const string line, const int top_k);
-void readDocLine(map<int, vector<pair<int, float> > > mat, map<int, float> &pwMap, int &src_pmid, string line);
+void thread_func( ofstream& result_file , const map<int, vector<pair<int, float> > > *mat , const vector<string> docLines , const int top_k);
+void thread_inner_func( ofstream& result_file , const map<int, vector<pair<int, float> > > *mat , const string line, const int top_k);
+void readDocLine(const map<int, vector<pair<int, float> > > *mat, map<int, float> &pwMap, int &src_pmid, string line);
 void readMatLine(map<int, vector<pair<int, float> > > &mat, string line);
-vector<string> calcAndSortScoreForOnePmid( map<int, vector<pair<int, float> > > mat , string line, int top_k);
+vector<string> calcAndSortScoreForOnePmid( const std::map<int, vector<pair<int, float> > > *mat , string line, int top_k);
 
 struct paircomp {
     bool operator() (const pair<int, float>& lhs, const pair<int, float>& rhs) const
@@ -97,10 +97,10 @@ int main(int argc, char* argv[]) {
         if (i != NUM_THREADS - 1) {
             vector<string> subDocLines(iter, iter + docNumPerThread);
             iter = iter + docNumPerThread;
-            t[i] = thread(thread_func, std::ref(result_file), mat, subDocLines, top_k);
+            t[i] = thread(thread_func, std::ref(result_file), &mat, subDocLines, top_k);
         } else {
             vector<string> subDocLines(iter, docLines.end());
-            t[i] = thread(thread_func, std::ref(result_file), mat, subDocLines, top_k);
+            t[i] = thread(thread_func, std::ref(result_file), &mat, subDocLines, top_k);
         }
     }
 
@@ -113,7 +113,7 @@ int main(int argc, char* argv[]) {
 
 void thread_func(
         ofstream& result_file
-        , const map<int, vector<pair<int, float> > > mat
+        , const map<int, vector<pair<int, float> > > *mat
         , const vector<string> docLines , const int top_k) {
     for(string dl : docLines) {
         thread_inner_func(result_file, mat, dl, top_k);
@@ -122,7 +122,7 @@ void thread_func(
 
 void thread_inner_func(
         ofstream& result_file
-        , const map<int, vector<pair<int, float> > > mat
+        , const map<int, vector<pair<int, float> > > *mat
         , const string line, const int top_k) {
 
     // calculate score and sort result
@@ -144,7 +144,7 @@ void thread_inner_func(
 }
 
 vector<string> calcAndSortScoreForOnePmid(
-        map<int, vector<pair<int, float> > > mat
+        const std::map<int, vector<pair<int, float> > > *mat
       , string line, int top_k) {
 
         map<int, float> pwMap;
@@ -181,7 +181,7 @@ vector<string> calcAndSortScoreForOnePmid(
 
 }
 
-void readDocLine(map<int, vector<pair<int, float> > > mat, 
+void readDocLine(const map<int, vector<pair<int, float> > > *mat, 
         map<int, float> &pwMap, int &src_pmid, string line) {
     stringstream linestream(line);
     string item;
@@ -202,7 +202,7 @@ void readDocLine(map<int, vector<pair<int, float> > > mat,
         int term_id = stoi(pairitem);
 
         // get rel_pw
-        vector<pair<int, float> > rel_pwVec = mat[term_id];
+        std::vector<std::pair<int, float> > rel_pwVec = mat->at(term_id);
 
         // get src_weight
         getline(pairstream, pairitem, delim2);

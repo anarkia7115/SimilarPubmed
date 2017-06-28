@@ -1,4 +1,4 @@
-all: calcScores testQueue wallet
+all: calcScores 
 calcScores:./src/main/cpp/main.cpp
 	g++ -pthread -O3 -std=c++1y ./src/main/cpp/main.cpp -o calcScores
 testQueue:./src/test/cpp/test.cpp
