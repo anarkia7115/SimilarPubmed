@@ -23,3 +23,39 @@ http://call.back.url/job/name
 14542173	Molecular genetics of Rhizobium Meliloti symbiotic nitrogen fixation.	"<AbstractText Label=""null"" NlmCategory=""UNLABELLED"">The application of recombinant DNA techniques to the study of symbiotic nitrogen fixation has yielded a growing list of Rhizobium meliloti genes involved in the processes of nodulation, infection thread formation and nitrogenase activity in nodules on the roots of the host plant, Medicago sativa (alfalfa). Interaction with the plant is initiated by genes encoding sensing and motility systems by which the bacteria recognizes and approaches the root. Signal molecules, such as flavonoids, mediate a complex interplay of bacterial and plant nodulation genes leading to entry of the bacteria through a root hair. As the nodule develops, the bacteria proceed inward towards the cortex within infection threads, the formation of which depends on bacterial genes involved in polysaccharide synthesis. Within the cortex, the bacteria enter host cells and differentiate into forms known as bacteroids. Genes which encode and regulate nitrogenase enzyme are expressed in the mature nodule, together with other genes required for import and metabolism of carbon and energy sources offered by the plant. </AbstractText>"
 14542174	Use of Xenopus oocytes to study the expression of cloned genes and translation of mRNA.	"<AbstractText Label=""null"" NlmCategory=""UNLABELLED"">One of the most active areas of research in the field of molecular biology is the examination of the mechanisms associated with the regulation of gene expression. Our understanding of the events in eukaryotic transcription has been aided by the ability to test the expression of various genomic DNA constructs after their microinjection into the germinal vesicle of Xenopus oocytes. This in vivo transcription system has permitted the analysis of the involvement of cis-acting DNA sequences and the examination of the effect of co-injected trans-acting factors on gene expression. Furthermore, the Xenopus oocyte has been employed widely as an in vivo translation system. Not only is the Xenopus oocyte system a sensitive assay for the translation of rare mRNAs but it also has the ability to post-translationally modify and compartmentalize numerous types of proteins. Finally, the Xenopus oocyte has proven useful in the procedures associated with the cloning and screening of cDNAs. </AbstractText>"
 ```
+### Output Format
+```
+<SOURCE PMID_1>\t<RELATED PMID_1>\t<SCORE_1_1>
+<SOURCE PMID_1>\t<RELATED PMID_2>\t<SCORE_1_2>
+<SOURCE PMID_1>\t<RELATED PMID_3>\t<SCORE_1_3>
+<SOURCE PMID_2>\t<RELATED PMID_1>\t<SCORE_2_1>
+<SOURCE PMID_2>\t<RELATED PMID_2>\t<SCORE_2_2>
+<SOURCE PMID_3>\t<RELATED PMID_1>\t<SCORE_3_1>
+...
+```
+### Example
+```
+915424  915424  39.762527
+915424  11845333        12.417924
+915424  26013017        12.304911
+915424  24844304        11.381235
+915424  19682601        11.377186
+915424  26151557        11.024003
+915424  19620393        10.757117
+915424  22200592        10.744744
+915424  16247693        10.645599
+915424  11108591        10.618491
+26376674        26376674        34.353954
+26376674        12184836        12.349423
+26376674        2503772 11.812834
+26376674        11248166        11.290904
+26376674        24608555        10.911844
+26376674        18034616        10.334626
+26376674        26135292        10.132594
+26376674        26516559        9.875148
+26376674        23807067        9.627439
+26376674        26429987        9.544746
+26376674        10557989        9.414326
+26376674        24131810        9.387953
+26376674        24649834        9.330328
+```
