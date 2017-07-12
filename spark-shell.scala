@@ -1483,3 +1483,22 @@ val fileList = Range(0, 172).map(i => {
 val rdds = fileList.map(fileName => {
   sc.objectFile[org.apache.spark.mllib.linalg.Vector](fileName, 1).collect
 })
+
+// group mesh
+val meshCount = mesh.as[(Int, String, Boolean)].rdd.map{
+  case (pmid, mesh, is_major) => {
+    (pmid, Seq(mesh))
+}}.reduceByKey(_++_).map { 
+  case (pmid, mesh_set) => {
+    (mesh_set.sorted.mkString("|"), Set(pmid))
+  }
+}.reduceByKey(_ ++ _).map{
+  case (mesh_string, pmid_set) => {
+    (mesh_string, pmid_set.mkString("|"), pmid_set.size)
+  }
+}
+
+// mesh
+meshCount.map{case (mesh_str, pmid_str, count) => 
+  "%s\t%s\t%s".format(mesh_str, pmid_str, count)
+}.saveAsTextFile("/result/meshCountTable")

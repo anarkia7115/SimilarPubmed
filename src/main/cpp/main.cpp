@@ -30,6 +30,7 @@ void fixPush( set<pair<int, float> , paircomp> &pwSet , int key, float value, in
 
 int main(int argc, char* argv[]) {
 
+    // read args
     if (argc < 4) {
         cout 
             << "not enough arguments!\n"
@@ -40,6 +41,7 @@ int main(int argc, char* argv[]) {
 
     int NUM_THREADS = 1;
 
+    // check args
     if (argc == 5) {
         NUM_THREADS = atoi(argv[4]);
         cout << "thread number is: " << NUM_THREADS << endl;
@@ -54,6 +56,7 @@ int main(int argc, char* argv[]) {
     string out_file = "/home/gcbi/data/result_cpp_1w.csv";
     */
 
+    // declare
     string dt_file(argv[1]);
     string td_file(argv[2]);
     string out_file(argv[3]);
@@ -93,6 +96,7 @@ int main(int argc, char* argv[]) {
     std::thread t[NUM_THREADS];
     auto iter = docLines.begin();
 
+    // multi thread 
     for (int i = 0; i < NUM_THREADS; ++i) {
         if (i != NUM_THREADS - 1) {
             vector<string> subDocLines(iter, iter + docNumPerThread);

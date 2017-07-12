@@ -59,6 +59,21 @@ object Main extends LazyLogging {
   import spark.implicits._
 
   def main(args: Array[String]): Unit = {
+    val matPath =  "hdfs://soldier1:9000/data/bigMatDf3" 
+    val termIdsDfPath = "hdfs://soldier1:9000/data/termIdsDf3"
+    val mat = spark.read.load(matPath)
+    val termIdsDf = spark.read.load(termIdsDfPath)
+    val termSize = termIdsDf.count.toInt
+
+    val svdAl = new algorithms.Svd(spark)
+    val vecs = svdAl.matToVecs(mat, termSize)
+    vecs.cache()
+    val svd = calcSvd(vecs)
+    val usBinPath = "hdfs://soldier1:9000/data/svd/us.bin"
+    svdAl.calcUs(svd, usBinPath)
+  }
+
+  def topResults(args: Array[String]): Unit = {
 
     val sc = spark.sparkContext
     val usBinPath = args(0)
@@ -96,6 +111,17 @@ object Main extends LazyLogging {
     val sc = spark.sparkContext
     val vecs = sc.objectFile[org.apache.spark.mllib.linalg.Vector](vecBinPath)
     vecs.zipWithUniqueId.map(_._2).max
+  }
+
+  def calcSvd(vecs:RDD[IndexedRow]): 
+    SingularValueDecomposition[IndexedRowMatrix, Matrix] = {
+
+    //import org.apache.spark.mllib.linalg.distributed.IndexedRowMatrix
+    val cmat = new IndexedRowMatrix(vecs)
+
+    val k = 1000
+    val svd = cmat.computeSVD(k, computeU=true)
+    svd
   }
 
   def calcSvd(): SingularValueDecomposition[RowMatrix, Matrix] = {

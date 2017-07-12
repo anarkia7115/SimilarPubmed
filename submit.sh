@@ -9,7 +9,8 @@ spark-submit \
   --driver-memory 4g \
   --conf "spark.driver.extraClassPath=/home/gcbi/jars/SimilarPubmed-assembly-1.0-deps.jar" \
   --conf "spark.driver.maxResultSize=0" \
-  hdfs://soldier1:9000/jars/similarpubmed_2.11-1.0.jar \
-  "hdfs://soldier1:9000/data/svd/us.bin" \
-  "hdfs://soldier1:9000/raw/pmid_range_may10.txt" \
-  "hdfs://soldier1:9000/data/svd/topResult_1w"
+  hdfs://soldier1:9000/jars/similarpubmed_2.11-1.0.jar
+
+#  "hdfs://soldier1:9000/data/svd/us.bin" \
+#  "hdfs://soldier1:9000/raw/pmid_range_may10.txt" \
+#  "hdfs://soldier1:9000/data/svd/topResult_1w"

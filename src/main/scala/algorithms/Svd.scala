@@ -3,12 +3,12 @@ package algorithms
 import org.apache.spark.mllib.linalg.distributed.{BlockMatrix, CoordinateMatrix, MatrixEntry, IndexedRowMatrix, RowMatrix}
 import org.apache.spark.mllib.linalg.distributed.IndexedRow
 import org.apache.spark.mllib.linalg.SingularValueDecomposition
+import org.apache.spark.mllib.linalg.{Matrix, Matrices}
 import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.rdd.RDD
 import org.apache.spark.mllib.linalg.Vector
 import org.apache.spark.mllib.linalg.Vectors
-import org.apache.spark.mllib.linalg.SingularValueDecomposition
 import org.apache.spark.mllib.linalg.Matrices
 import scala.collection.SortedSet
 
@@ -43,6 +43,23 @@ class Svd(spark:SparkSession) {
   //val svd = cmat.computeSVD(k, computeU=true)
   //val us = multiplyByDiagonalRowMatrix(svd.U, svd.s)
 
+  def matToVecs(mat:DataFrame, termSize:Int): 
+    RDD[IndexedRow] = {
+
+    val docTws = mat.map(attrs => {
+      val term_id = attrs.getInt(0)
+      val pmid = attrs.getInt(1)
+      val weight = attrs.getDouble(2)
+      (pmid, Seq((term_id, weight)))
+    }).rdd.reduceByKey(_ ++ _).persist(org.apache.spark.storage.StorageLevel.DISK_ONLY)
+
+    val vecs = docTws.map {
+      case (pmid, twList) => {
+        new IndexedRow(pmid, Vectors.sparse(termSize, twList))
+      }
+    }
+    return vecs
+  }
   def run(us:RDD[IndexedRow], pmidRdd:RDD[Long], topResultsOut:String): Unit = {
     val topResults: Seq[(Long, Long, Double)] = 
       topDocsForDoc(us, pmidRdd)
@@ -61,6 +78,16 @@ class Svd(spark:SparkSession) {
       ).map{case (pmid, score) => {
         "%s\t%s".format(pmid, score)
       }}.saveAsTextFile(topResultsOut)
+  }
+
+  def calcUs(
+    svd:SingularValueDecomposition[IndexedRowMatrix, Matrix] 
+  , resultPath:String
+  ): Unit = {
+    val uIdxMat = svd.U
+    val sVec = svd.s
+    val us = multiplyByDiagonalRowMatrix(uIdxMat, sVec)
+    us.rows.saveAsObjectFile(resultPath)
   }
 
   def calcUs(uRows:RDD[IndexedRow], sRdd:RDD[Double]): Unit = {
