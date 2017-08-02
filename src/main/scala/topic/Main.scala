@@ -52,13 +52,93 @@ case class PpScore(src_pmid:Int, rel_pmid:Int, score:Double)
 object Main extends LazyLogging {
   val spark = SparkSession
     .builder
-    .appName("Matrix Multiply")
+    .appName("Pubmed mat generator")
     .config("spark.master", "spark://soldier1:7077")
     .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
     .getOrCreate()
   import spark.implicits._
 
   def main(args: Array[String]): Unit = {
+    val absPath = args(0)
+    val idfsOutPath = args(1)
+    val termIdsOutPath = args(2)
+    val matOutputPath = args(3)
+    val flatMatOutputPath = args(4)
+
+    val mat = bagOfWordsProcess(spark, absPath, idfsOutPath, termIdsOutPath)
+    mat.write.save(flatMatOutputPath)
+
+    /*
+    // termPw [term , pwSeq]
+    val termPw = mat.map(attrs => 
+      ( attrs.getInt(0),
+        Seq("%d,%f".format(attrs.getInt(1), attrs.getDouble(2)))
+      )
+    ).rdd.reduceByKey(_++_).
+    map({ case (term, pwSeq) => (
+      "%d\t%s".format(term, pwSeq.mkString("\t") ))
+    })
+
+    val clearedMat = clearMat(termPw)
+
+    clearedMat.saveAsTextFile(matOutputPath)
+    */
+    spark.close
+  }
+
+  // clear mat data
+  def clearMat(termPwMat:RDD[String]): RDD[String] = {
+    // mat [term , pwSeq]
+    val SIZE_LIMIT = 10000000
+    val WEIGHT_LIMIT = 0.5
+    val clearedMat = termPwMat.filter(_.split("\t").size < SIZE_LIMIT ).flatMap(line => { 
+      val fields = line.split("\t")
+      val term_id = fields(0)
+      val pwSeq = fields.slice(1, fields.size)
+      val heavy_pwSeq = pwSeq.filter(_.split(",")(1).toDouble > WEIGHT_LIMIT)
+      if(heavy_pwSeq.size > 0) {
+        Some("%s\t%s".format(term_id, heavy_pwSeq.mkString("\t")))
+      } else {
+        None
+      }
+    })
+    return clearedMat
+  }
+
+  def termPwToText(args: Array[String]): Unit = {
+    val matInputPath = args(0)
+    val mat = spark.read.load(matInputPath)
+    // mat [term , pwSeq]
+    val termPw = mat.map(attrs => 
+      ( attrs.getInt(0),
+        Seq("%d,%f".format(attrs.getInt(1), attrs.getDouble(2)))
+      )
+    ).rdd.reduceByKey(_++_).
+    map({ case (term, pwSeq) => (
+      "%d\t%s".format(term, pwSeq.mkString("\t") ))
+    })
+
+    // write text
+    termPw.saveAsTextFile("hdfs://node19:9000/data/termPw.text")
+  }
+
+  def matProcess(absPath:String
+    , idfsOutPath:String
+    , termIdsOutPath:String
+    , matOutPath:String): Unit = {
+
+    /*
+    val absPath = args(0)
+    val idfsOutPath = args(1)
+    val termIdsOutPath = args(2)
+    val matOutPath = args(3)
+    */
+
+    val mat = bagOfWordsProcess(spark, absPath, idfsOutPath, termIdsOutPath)
+    mat.write.save(matOutPath)
+  }
+
+  def svdUs(args: Array[String]): Unit = {
     val matPath =  "hdfs://soldier1:9000/data/bigMatDf3" 
     val termIdsDfPath = "hdfs://soldier1:9000/data/termIdsDf3"
     val mat = spark.read.load(matPath)
@@ -1127,6 +1207,7 @@ object Main extends LazyLogging {
     // big mat
     val wt = new algorithms.Weights(spark)
     val mat = wt.scoreMatByDocs(tfByPmid, bIdfs.value, bTermIds.value)
+    /* term_id, pmid, weight */
     mat
   }
 
