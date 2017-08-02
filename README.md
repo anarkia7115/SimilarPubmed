@@ -59,3 +59,65 @@ http://call.back.url/job/name
 26376674        24131810        9.387953
 26376674        24649834        9.330328
 ```
+
+## Installation
+### Spark
+1. Spark
+* Download spark-2.2.0-bin-hadoop2.7.tgz
+* untar
+```
+tar -vzxf spark-2.2.0-bin-hadoop2.7.tgz
+```
+* move to /application
+```
+mv ./spark-2.2.0-bin-hadoop2.7 /application/
+```
+* set SPARK_HOME in .bashrc
+```
+export SPARK_HOME="/application/spark-2.2.0-bin-hadoop2.7"
+```
+* configure host-file
+```
+# 127.0.0.1 app04
+192.168.2.9 app04
+```
+* configure $SPARK_HOME/conf/spark-default.conf
+```
+spark.master                     spark://app04:7077
+spark.eventLog.enabled           true
+spark.eventLog.dir               /data/spark-logs
+spark.local.dir                  /data/tmp
+```
+* change user priviledge of /data/spark-logs and /data/tmp
+* configure $SPARK_HOME/conf/slaves
+```
+app04
+```
+* make dir for history server
+```
+mkdir /tmp/spark-events
+```
+* change $SPARK_HOME/conf/log4j.properties, redirect spark log to file
+```
+log4j.rootCategory=INFO, file
+log4j.appender.file=org.apache.log4j.RollingFileAppender
+log4j.appender.file.layout=org.apache.log4j.PatternLayout
+log4j.appender.file.layout.ConversionPattern=%d{yy/MM/dd HH:mm:ss} %p %c{1}: %m%n
+log4j.appender.file.File=/home/gcbi/spark-driver.log
+log4j.appender.file.MaxFileSize=10MB
+log4j.appender.file.MaxBackupIndex=10
+```
+* start master, workers and history server
+```
+$SPARK_HOME/sbin/start-master.sh -h app04 -p 7077
+export SPARK_SSH_OPTS="-p 58422"; $SPARK_HOME/sbin/start-slaves.sh
+
+$SPARK_HOME/sbin/start-history-server.sh
+```
+* make dir /home/gcbi/SimilarPubmed/src/main/cpp /home/gcbi/SimilarPubmed/jars
+* deploy jars and cpp files
+```
+scp /home/shawn/git/PubmedWordGame/SimilarPubmed/target/scala-2.11/similarpubmed_2.11-1.0.jar app04:/home/gcbi/SimilarPubmed/jars/
+scp /home/shawn/git/PubmedWordGame/SimilarPubmed/target/scala-2.11/SimilarPubmed-assembly-1.0-deps.jar app04:/home/gcbi/SimilarPubmed/jars/
+scp /home/shawn/git/PubmedWordGame/SimilarPubmed/src/main/cpp/* app04:/home/gcbi/SimilarPubmed/src/main/cpp
+```

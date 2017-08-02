@@ -13,8 +13,7 @@
 
 using namespace std;
 std::mutex mtx;
-void thread_func( ofstream& result_file , const map<int, vector<pair<int, float> > > *mat , const vector<string> docLines , const int top_k);
-void thread_inner_func( ofstream& result_file , const map<int, vector<pair<int, float> > > *mat , const string line, const int top_k);
+void thread_func( const map<int, vector<pair<int, float> > > *mat, const int top_k);
 void readDocLine(const map<int, vector<pair<int, float> > > *mat, map<int, float> &pwMap, int &src_pmid, string line);
 void readMatLine(map<int, vector<pair<int, float> > > &mat, string line);
 vector<string> calcAndSortScoreForOnePmid( const std::map<int, vector<pair<int, float> > > *mat , string line, int top_k);
@@ -31,10 +30,10 @@ void fixPush( set<pair<int, float> , paircomp> &pwSet , int key, float value, in
 int main(int argc, char* argv[]) {
 
     // read args
-    if (argc < 4) {
-        cout 
+    if (argc < 2) {
+        cerr 
             << "not enough arguments!\n"
-            << "./calcScores <doc_file> <mat_file> <result_file>"
+            << "./calcScores <mat_file> "
             << endl;
         return -1;
     }
@@ -42,11 +41,11 @@ int main(int argc, char* argv[]) {
     int NUM_THREADS = 1;
 
     // check args
-    if (argc == 5) {
-        NUM_THREADS = atoi(argv[4]);
-        cout << "thread number is: " << NUM_THREADS << endl;
+    if (argc == 3) {
+        NUM_THREADS = atoi(argv[2]);
+        cerr << "thread number is: " << NUM_THREADS << endl;
     } else {
-        cout << "thread number not set... single thread process...";
+        cerr << "thread number not set... single thread process..." << std::endl;;
     }
 
     int top_k = 101;
@@ -57,13 +56,9 @@ int main(int argc, char* argv[]) {
     */
 
     // declare
-    string dt_file(argv[1]);
-    string td_file(argv[2]);
-    string out_file(argv[3]);
+    string td_file(argv[1]);
 
-    ifstream doc_file(dt_file.c_str());
     ifstream mat_file(td_file.c_str());
-    ofstream result_file(out_file.c_str());
 
     int src_pmid;
     int rel_pmid;
@@ -76,75 +71,60 @@ int main(int argc, char* argv[]) {
     int lnr = 0;
     while (getline(mat_file, line)) {
         if (lnr % 10000 == 0) {
-            cout << lnr << "lines read." << endl;
+            cerr << lnr << "lines read." << endl;
         }
         readMatLine(mat, line);
         lnr++;
     }
 
-    cout << "mat read!" << endl;
+    cerr << "mat read!" << endl;
 
-    // read lines to docLines
-    vector<string> docLines;
-    while (getline(doc_file, line)) {
-        docLines.push_back(line);
-    }
+    // TODO: move getline into thread function
 
     // multi thread 
-    int docNumPerThread = docLines.size() / NUM_THREADS;
-    //int lastDocNumPerThread = docLines.size() - docNumPerThread * (NUM_THREADS - 1);
 
     std::thread t[NUM_THREADS];
-    auto iter = docLines.begin();
 
     for (int i = 0; i < NUM_THREADS; ++i) {
-        if (i != NUM_THREADS - 1) {
-            vector<string> subDocLines(iter, iter + docNumPerThread);
-            iter = iter + docNumPerThread;
-            t[i] = thread(thread_func, std::ref(result_file), &mat, subDocLines, top_k);
-        } else {
-            vector<string> subDocLines(iter, docLines.end());
-            t[i] = thread(thread_func, std::ref(result_file), &mat, subDocLines, top_k);
-        }
+        t[i] = thread(thread_func, &mat, top_k);
     }
 
     for (int i = 0; i < NUM_THREADS; ++i) {
         t[i].join();
     }
-
-    result_file.close();
 }
 
 void thread_func(
-        ofstream& result_file
-        , const map<int, vector<pair<int, float> > > *mat
-        , const vector<string> docLines , const int top_k) {
-    for(string dl : docLines) {
-        thread_inner_func(result_file, mat, dl, top_k);
-    }
-}
-
-void thread_inner_func(
-        ofstream& result_file
-        , const map<int, vector<pair<int, float> > > *mat
-        , const string line, const int top_k) {
+        const map<int, vector<pair<int, float> > > *mat
+        , const int top_k) {
 
     // calculate score and sort result
     // mesure time
-    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-    vector<string> resultLines = calcAndSortScoreForOnePmid(mat, line, top_k);
-    std::chrono::steady_clock::time_point end= std::chrono::steady_clock::now();
+    while(true) {
+      // check getline status
+      mtx.lock();
+      string line;
+      if(!getline(std::cin, line)){
+        mtx.unlock();
+        break;
+      }
+      mtx.unlock();
 
-    // write to file
-    mtx.lock();
-    std::cout << "Time difference = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() <<std::endl;
+      // calculation
+      std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+      vector<string> resultLines = calcAndSortScoreForOnePmid(mat, line, top_k);
+      std::chrono::steady_clock::time_point end= std::chrono::steady_clock::now();
 
-    for (string rl: resultLines){
-        result_file << rl;
+      // write to file
+      //mtx.lock();
+      std::cerr << "Time difference = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() <<std::endl;
+
+      for (string rl: resultLines){
+        std::cout << rl;
+      }
+
+      //mtx.unlock();
     }
-    result_file.flush();
-
-    mtx.unlock();
 }
 
 vector<string> calcAndSortScoreForOnePmid(
@@ -155,6 +135,7 @@ vector<string> calcAndSortScoreForOnePmid(
         int src_pmid;
 
         // parse doc line to map
+        std::cerr << "read doc line..." << std::endl;
         readDocLine(mat, pwMap, src_pmid, line);
 
         // map to set pair
@@ -179,8 +160,7 @@ vector<string> calcAndSortScoreForOnePmid(
             resultLines.push_back(rl);
             iter_k +=1;
         }
-        //result_file.flush();
-        cout << "ready to write: " << src_pmid << "to file" << endl;
+        cerr << "ready to write: " << src_pmid << "to file" << endl;
         return resultLines;
 
 }
@@ -206,7 +186,10 @@ void readDocLine(const map<int, vector<pair<int, float> > > *mat,
         int term_id = stoi(pairitem);
 
         // get rel_pw
-        std::vector<std::pair<int, float> > rel_pwVec = mat->at(term_id);
+        std::vector<std::pair<int, float> > rel_pwVec;
+        if (mat->find(term_id) != mat->end()){
+          rel_pwVec = mat->at(term_id);
+        }
 
         // get src_weight
         getline(pairstream, pairitem, delim2);
@@ -270,13 +253,13 @@ void fixPush(
       , int key, float value, int top_k) {
 
     // if not full
-    //std::cout << "try pushing..." << std::endl;
-    //std::cout << "set size:" << pwSet.size() << std::endl;
+    //std::cerr << "try pushing..." << std::endl;
+    //std::cerr << "set size:" << pwSet.size() << std::endl;
     if (pwSet.size() < top_k) {
-        //std::cout << "insert" << std::endl;
+        //std::cerr << "insert" << std::endl;
         pwSet.insert({key, value});
     } else {
-        //std::cout << "current rbegin:" << pwSet.rbegin()->second << std::endl;
+        //std::cerr << "current rbegin:" << pwSet.rbegin()->second << std::endl;
         if (value > pwSet.rbegin()->second){
             // replace
             pwSet.erase(--pwSet.end());
