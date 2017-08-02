@@ -12,9 +12,15 @@ class BagOfWords(spark:SparkSession) {
   /*
    * From local/hdfs to rdd
    * */
+  def load(inputRDD:RDD[String]): RDD[(Int, String, String)] = {
+    val cd = new render.CleanDocs(spark:SparkSession)
+    val cleanRdd = cd.getRdd(inputRDD)
+    return cleanRdd
+  }
+
   def load(inputPath:String): RDD[(Int, String, String)] = {
-    val cd = new render.CleanDocs(inputPath, spark:SparkSession)
-    val cleanRdd = cd.getRdd()
+    val cd = new render.CleanDocs(spark:SparkSession)
+    val cleanRdd = cd.getRdd(inputPath)
     return cleanRdd
   }
 
