@@ -2,8 +2,8 @@
 ## T+1 update
 ### Input Format
 ```
-<Output File Path>
-<Callback URL>/<RabbitMq QueueName>
+output\tfile://<Output File Path>
+callback\t<Callback URL>/<RabbitMq QueueName>
 <PMID1>\t<TITLE>\t<ABSTRACT>
 <PMID2>\t<TITLE>\t<ABSTRACT>
 <PMID3>\t<TITLE>\t<ABSTRACT>
