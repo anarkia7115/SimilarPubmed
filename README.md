@@ -62,7 +62,6 @@ http://call.back.url/job/name
 
 ## Installation
 ### Spark
-1. Spark
 * Download spark-2.2.0-bin-hadoop2.7.tgz
 * untar
 ```
@@ -115,6 +114,8 @@ export SPARK_SSH_OPTS="-p 58422"; $SPARK_HOME/sbin/start-slaves.sh
 $SPARK_HOME/sbin/start-history-server.sh
 ```
 * make dir /home/gcbi/SimilarPubmed/src/main/cpp /home/gcbi/SimilarPubmed/jars
+
+### Executable files and sorce files
 * deploy jars and cpp files
 ```
 scp /home/shawn/git/PubmedWordGame/SimilarPubmed/target/scala-2.11/similarpubmed_2.11-1.0.jar app04:/home/gcbi/SimilarPubmed/jars/
