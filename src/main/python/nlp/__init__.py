@@ -1,1 +1,1 @@
-__all__ = ["preprocessor"]
+__all__ = ["tokenizer", "preprocessor", "vectorizer"]

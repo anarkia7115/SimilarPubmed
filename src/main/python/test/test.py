@@ -6,6 +6,51 @@ import unittest
 import data
 from colorama import Fore, Style
 
+class VectorizerTestCase(unittest.TestCase):
+  def setUp(self):
+    from nlp.vectorizer import WordVectorizer
+    self.wv = WordVectorizer()
+    from util import reader
+    self.read_raw = reader.read_raw
+
+  def test_vectorizer(self):
+    input_file = "./data/raw_abs_test.txt"
+    # read raw documents from file
+    raw_doc_list = self.read_raw(input_file)
+    # combine tile and text with " " in between
+    doc_list = [(doc_id, "{} {}".format(title, text)) 
+                for (doc_id, title, text) in raw_doc_list]
+    (term_doc, term_ids) = self.wv.generate_base_mat(doc_list)
+
+
+    """
+      Output to file
+    """
+    term_doc_out_file = "./data/test_term_doc.txt"
+    term_ids_out_file = "./data/test_term_ids.txt"
+    self.wv.write_term_doc(term_doc, term_doc_out_file)
+    self.wv.write_term_ids(term_ids, term_ids_out_file)
+
+  def test_generate_src_mat(self):
+    # term_ids
+    term_ids_in_file = "./data/test_term_ids_copy.txt"
+    term_ids = self.wv.read_term_ids(term_ids_in_file)
+
+    # doc_lines
+    input_file = "./data/raw_abs_test.txt"
+    # read raw documents from file
+    raw_doc_list = self.read_raw(input_file)
+    # combine tile and text with " " in between
+    doc_list = [(doc_id, "{} {}".format(title, text)) 
+                for (doc_id, title, text) in raw_doc_list]
+
+    # src_mat
+    mat_strings = self.wv.generate_src_mat(doc_list, term_ids)
+    # write
+    src_mat_out_file = "./data/test_src_mat.txt"
+    self.wv.write_src_mat(mat_strings, src_mat_out_file)
+
+
 class RenderTestCase(unittest.TestCase):
   def setUp(self):
     import util.render
@@ -33,18 +78,36 @@ class ReaderTestCase(unittest.TestCase):
 class PreprocessTestCase(unittest.TestCase):
   def setUp(self):
     import nlp.preprocessor
-    self.document = data.preprocess_document
     self.wp = nlp.preprocessor.WordPreprocessor()
+
+  def test_preprocess(self):
+
+    raw_text = data.preprocess_raw
+    trimed_text = self.wp.preprocess(raw_text)
+    target_text = data.preprocess_target
+
+    self.assertEqual(trimed_text, target_text, 
+                     "preprocess failed:\n{}\n{}\n".format(trimed_text,
+                                                           target_text))
+
+
+class TokenizeTestCase(unittest.TestCase):
+  def setUp(self):
+    import nlp.tokenizer
+    self.document = data.tokenize_document.decode("utf8")
+    self.wt = nlp.tokenizer.WordTokenizer()
 
   def test_lemmatize(self):
 
     # origin
     origin_words = self.document.rstrip().split(" ")
-    # preprocess
-    tokens = self.wp.preprocess(self.document, False)
+    # tokenize
+    tokens = self.wt.tokenize(self.document, False)
     
     for origin_word, token in zip(origin_words, tokens):
-      print("{} -> {}".format(origin_word, token))
+      print(origin_word.encode("utf8"))
+      print(token.encode("utf8"))
+      print("{} -> {}".format(origin_word.encode("utf8"), token.encode("utf8")))
 
     # assert for zip
     self.assertEqual(len(origin_words), len(tokens))
@@ -57,18 +120,18 @@ class PreprocessTestCase(unittest.TestCase):
   def test_stopwords(self):
 
     # copy stop words
-    stops = self.wp.stops
+    stops = self.wt.stops
 
-    # preprocess
-    tokens_no_apply_stops = self.wp.preprocess(self.document, False)
+    # tokenize
+    tokens_no_apply_stops = self.wt.tokenize(self.document, False)
 
     non_stop_words = []
     # check 1
     for word in tokens_no_apply_stops:
-      if not self.is_ascii(word) or word not in stops:
+      if word not in stops:
         # normal words
         non_stop_words.append(word)
-        print(word, end=" ")
+        print(word.encode("utf8"), end=" ")
       else:
         # stop words, highlight print!
         print(Fore.RED + word, end=" ")
@@ -76,12 +139,12 @@ class PreprocessTestCase(unittest.TestCase):
 
     print("\n")
     # check 2
-    tokens_apply_stops = self.wp.preprocess(self.document, True)
+    tokens_apply_stops = self.wt.tokenize(self.document, True)
     self.assertEqual(tokens_apply_stops, non_stop_words)
 
 
-  def test_preprocess(self):
-    cleaned_words = self.wp.preprocess(data.preprocess_document)
+  def test_tokenize(self):
+    cleaned_words = self.wt.tokenize(self.document)
 
   def is_ascii(self, token):
     try:
