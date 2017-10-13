@@ -4,10 +4,10 @@ int main(int argc, char* argv[]) {
 
   // read args
   if (argc < 3) {
-      cout 
+    std::cout 
           << "not enough arguments!\n"
           << "./calcScores <mat_txt_file> <mat_archive_file>"
-          << endl;
+          << std::endl;
       return -1;
   }
 
@@ -18,10 +18,10 @@ int main(int argc, char* argv[]) {
   std::string td_file(argv[1]);
   std::string archive_file(argv[2]);
 
-  TermPwMat.readMat(td_file);
+  termPwMat.readMat(td_file);
 
   // save data to archive
-  TermPwMat.saveMat(archive_file);
+  termPwMat.saveMat(archive_file);
 
   // test read
   //termPwMat.loadMat(archive_file);

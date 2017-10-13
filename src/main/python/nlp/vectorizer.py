@@ -100,7 +100,7 @@ class WordVectorizer(object):
       tv_string = ""
       for (term_id, count_num) in token_counter.items():
         one_tv_string = "{},{}".format(term_id, count_num)
-        tv_string = tv_string + "\t" + one_tv_string
+        tv_string = tv_string + one_tv_string + "\t"
 
       tv_string = tv_string.rstrip("\t")
 
