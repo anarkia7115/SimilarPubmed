@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <thread>
+#include "TermPwMat.hpp"
 
 using namespace std;
 std::mutex mtx;
@@ -56,9 +57,10 @@ int main(int argc, char* argv[]) {
     */
 
     // declare
-    string td_file(argv[1]);
+    //string td_file(argv[1]);
+    string termPw_archive_file(argv[1]);
 
-    ifstream mat_file(td_file.c_str());
+    //ifstream mat_file(td_file.c_str());
 
     int src_pmid;
     int rel_pmid;
@@ -66,7 +68,7 @@ int main(int argc, char* argv[]) {
     float rel_weight;
 
     // read mat to map
-    map<int, vector<pair<int, float> > > mat;
+    /*
     string line;
     int lnr = 0;
     while (getline(mat_file, line)) {
@@ -76,6 +78,12 @@ int main(int argc, char* argv[]) {
         readMatLine(mat, line);
         lnr++;
     }
+    */
+    // read mat
+    TermPwMat * termPw = new TermPwMat;
+    termPw->loadMat(termPw_archive_file);
+    std::map<int, vector<pair<int, float> > > mat = termPw->getMat();
+    delete termPw;
 
     cerr << "mat read!" << endl;
 
@@ -156,6 +164,10 @@ vector<string> calcAndSortScoreForOnePmid(
             if (iter_k > top_k) {
                 break;
             }
+            // skip self
+            if (src_pmid == it.first) {
+              continue;
+            }
             rl = to_string(src_pmid) + "\t" + to_string(it.first) + "\t" + to_string(it.second) + "\n";
             resultLines.push_back(rl);
             iter_k +=1;
@@ -218,21 +230,23 @@ void readMatLine(map<int, vector<pair<int, float> > > &mat, string line) {
     stringstream linestream(line);
     int term_id;
     string item;
-    string item_empty;
+    //string item_empty;
 
     // term_id
     char delim1 = '\t';
     getline(linestream, item, delim1);
-    getline(linestream, item_empty, delim1);
+    //getline(linestream, item_empty, delim1);
     term_id = stoi(item);
 
     // pw vector
     vector<pair<int, float> > rel_vec;
     char delim2 = ',';
     while (getline(linestream, item, delim1)) {
+        /*
         if(!getline(linestream, item_empty, delim1)){
             break;
         }
+        */
         stringstream pairstream(item);
         string pairitem;
 

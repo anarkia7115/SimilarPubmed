@@ -235,21 +235,23 @@ void readMatLine(map<int, vector<pair<int, float> > > &mat, string line) {
     stringstream linestream(line);
     int term_id;
     string item;
-    string item_empty;
+    //string item_empty;
 
     // term_id
     char delim1 = '\t';
     getline(linestream, item, delim1);
-    getline(linestream, item_empty, delim1);
+    //getline(linestream, item_empty, delim1);
     term_id = stoi(item);
 
     // pw vector
     vector<pair<int, float> > rel_vec;
     char delim2 = ',';
     while (getline(linestream, item, delim1)) {
+        /*
         if(!getline(linestream, item_empty, delim1)){
             break;
         }
+        */
         stringstream pairstream(item);
         string pairitem;
 

@@ -52,13 +52,15 @@ case class PpScore(src_pmid:Int, rel_pmid:Int, score:Double)
 object Main extends LazyLogging {
   val spark = SparkSession
     .builder
-    .appName("Pubmed mat generator")
-    .config("spark.master", "spark://soldier1:7077")
+    .appName("Pubmed mat generator") //.config("spark.master", "spark://hpc2:7077")
     .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
     .getOrCreate()
   import spark.implicits._
 
-  def main(args: Array[String]): Unit = {
+  def main(): Unit = {
+  }
+
+  def mat_generator(args: Array[String]): Unit = {
     val absPath = args(0)
     val idfsOutPath = args(1)
     val termIdsOutPath = args(2)
@@ -68,21 +70,25 @@ object Main extends LazyLogging {
     val mat = bagOfWordsProcess(spark, absPath, idfsOutPath, termIdsOutPath)
     mat.write.save(flatMatOutputPath)
 
-    /*
+    //val mat = spark.read.load(flatMatOutputPath)
     // termPw [term , pwSeq]
     val termPw = mat.map(attrs => 
       ( attrs.getInt(0),
         Seq("%d,%f".format(attrs.getInt(1), attrs.getDouble(2)))
       )
-    ).rdd.reduceByKey(_++_).
+    ).rdd.reduceByKey(_++_)
+
+    //termPw.checkpoint()
+
+    val termPwStrings = termPw.
     map({ case (term, pwSeq) => (
       "%d\t%s".format(term, pwSeq.mkString("\t") ))
     })
 
-    val clearedMat = clearMat(termPw)
+    //termPwStrings.checkpoint()
+    val clearedMat = clearMat(termPwStrings)
 
     clearedMat.saveAsTextFile(matOutputPath)
-    */
     spark.close
   }
 

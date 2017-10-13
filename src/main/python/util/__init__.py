@@ -1,1 +1,1 @@
-all = ["reader", "put"]
+__all__ = ["reader", "put", "render"]
