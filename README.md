@@ -122,3 +122,22 @@ scp /home/shawn/git/PubmedWordGame/SimilarPubmed/target/scala-2.11/similarpubmed
 scp /home/shawn/git/PubmedWordGame/SimilarPubmed/target/scala-2.11/SimilarPubmed-assembly-1.0-deps.jar app04:/home/gcbi/SimilarPubmed/jars/
 scp /home/shawn/git/PubmedWordGame/SimilarPubmed/src/main/cpp/* app04:/home/gcbi/SimilarPubmed/src/main/cpp
 ```
+
+## Generate base/calc mat
+1. generate base
+```
+cd src/main/python
+
+./run.py base \
+  ./data/raw_abs_test.txt \
+  ./data/test_term_ids.txt \
+  ./data/test_base_mat.txt
+
+```
+2. generate calc
+```
+./run.py calc \
+  ./data/raw_abs_test.txt \
+  ./data/test_term_ids.txt \
+  ./data/test_calc_mat.txt
+```
